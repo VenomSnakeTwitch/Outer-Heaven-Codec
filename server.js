@@ -1,5 +1,4 @@
 const express = require('express');
-const https = require('https');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
@@ -7,13 +6,7 @@ const fs = require('fs');
 
 const app = express();
 
-// --- SSL-Zertifikate laden ---
-const sslOptions = {
-    key: fs.readFileSync(path.join(__dirname, 'server.key')),
-    cert: fs.readFileSync(path.join(__dirname, 'server.crt'))
-};
-
-const server = https.createServer(sslOptions, app);
+const server = http.createServer(app);
 const io = new Server(server, {
     maxHttpBufferSize: 3e9
 });
@@ -508,5 +501,5 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
-    console.log(`HTTPS Server läuft auf Port ${PORT}`);
+    console.log(`HTTP Server läuft auf Port ${PORT}`);
 });
