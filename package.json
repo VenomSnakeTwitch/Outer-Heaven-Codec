@@ -1,0 +1,12 @@
+{
+  "name": "outer-heaven-codec",
+  "version": "1.0.2",
+  "description": "Outer Heaven Codec Secure Communication",
+  "main": "main.js",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.19.2",
+    "selfsigned": "^2.4.1",
+    "socket.io": "^4.7.5"
+  }
+}

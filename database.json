@@ -1,0 +1,41 @@
+{
+  "profiles": {
+    "VenomSnake_Twitch": {
+      "username": "VenomSnake_Twitch",
+      "audioInputId": "ecc4d70603a1c730049ef6405a2f8149bbb6da9d7f4dbacdcfeba376a0f2263c",
+      "audioOutputId": "9efa0ceb1e73e6ecdaea00d3378e56a689b83bd5180ff690e222c705b1906673"
+    },
+    "SolidSnake": {
+      "username": "SolidSnake",
+      "audioInputId": "edd92fc9ba115de64bc78ff92cf0198c67355b819b729ba701a3cddd1fcdadcb",
+      "audioOutputId": "d65087d9868c3e0847682927c18d57f7c98b0abcc823723a83ca10f8166b2ecc"
+    },
+    "Randolf": {
+      "username": "Randolf",
+      "audioInputId": "default",
+      "audioOutputId": "default"
+    }
+  },
+  "friends": {
+    "SolidSnake": [
+      "VenomSnake_Twitch"
+    ],
+    "VenomSnake_Twitch": [
+      "SolidSnake"
+    ]
+  },
+  "requests": {
+    "SolidSnake": []
+  },
+  "messages": [],
+  "channels": {
+    "text": [
+      "allgemein",
+      "gta-online"
+    ],
+    "voice": [
+      "Lobby",
+      "test"
+    ]
+  }
+}
