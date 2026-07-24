@@ -77,7 +77,7 @@ app.post('/api/register', (req, res) => {
         audioInputId: '',
         audioOutputId: ''
     };
-    
+
     saveDatabase();
     res.json({ success: true, message: 'Registrierung erfolgreich!' });
 });
@@ -126,7 +126,7 @@ app.post('/api/upload-avatar', (req, res) => {
 
         fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
         const avatarUrl = `/uploads/${fileName}`;
-        
+
         if (!db.profiles[username]) db.profiles[username] = {};
         db.profiles[username].avatar = avatarUrl;
         saveDatabase();
@@ -270,7 +270,7 @@ io.on('connection', (socket) => {
         if (!socket.username || !targetUser) return;
         const room = [socket.username, targetUser].sort().join('_call_');
         socket.leave(room);
-        
+
         for (let [id, s] of io.sockets.sockets) {
             if (s.username === targetUser) {
                 s.leave(room);
@@ -310,7 +310,7 @@ io.on('connection', (socket) => {
 
     socket.on('chat_message', (data) => {
         let text = data.message || '';
-        
+
         const urlRegex = /(https?:\/\/[^\s]+)/g;
         text = text.replace(urlRegex, (url) => {
             let hostname = '';
@@ -349,7 +349,7 @@ io.on('connection', (socket) => {
 
         try {
             let matches, fileExtension;
-            
+
             if (type === 'image') {
                 matches = fileData.match(/^data:image\/([A-Za-z-+\/]+);base64,(.+)$/);
                 fileExtension = matches ? (matches[1] === 'jpeg' ? 'jpg' : matches[1]) : 'png';
@@ -371,7 +371,7 @@ io.on('connection', (socket) => {
 
             fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
             const fileUrl = `/uploads/${fileName}`;
-            
+
             let messageHTML = '';
             if (type === 'image') {
                 messageHTML = `<img src="${fileUrl}" style="max-width: 350px; max-height: 350px; border-radius: 8px; margin-top: 6px; display: block; box-shadow: 0 2px 10px rgba(0,0,0,0.3);">`;
@@ -431,7 +431,7 @@ io.on('connection', (socket) => {
 
     socket.on('send_friend_request', (data, callback) => {
         const { username, targetName } = data;
-        
+
         if (!targetName || targetName.trim() === '') {
             return callback({ success: false, message: 'Ungültiger Benutzer.' });
         }
@@ -449,10 +449,10 @@ io.on('connection', (socket) => {
 
         if (db.requests[username]?.includes(targetName)) {
             db.requests[username] = db.requests[username].filter(u => u !== targetName);
-            
+
             if (!db.friends[username]) db.friends[username] = [];
             if (!db.friends[targetName]) db.friends[targetName] = [];
-            
+
             if (!db.friends[username].includes(targetName)) db.friends[username].push(targetName);
             if (!db.friends[targetName].includes(username)) db.friends[targetName].push(username);
 
@@ -497,6 +497,17 @@ io.on('connection', (socket) => {
         saveDatabase();
         if (typeof callback === 'function') callback({ success: true, friends: db.friends[username] || [] });
     });
+});
+
+// --- Diagnose-Endpunkt zum Einsehen der Datenbank im Browser ---
+app.get('/api/view-db', (req, res) => {
+    if (fs.existsSync(dbFile)) {
+        const data = fs.readFileSync(dbFile, 'utf8');
+        res.setHeader('Content-Type', 'application/json');
+        res.send(data);
+    } else {
+        res.status(404).json({ success: false, message: 'Keine database.json gefunden.' });
+    }
 });
 
 const PORT = process.env.PORT || 3000;
