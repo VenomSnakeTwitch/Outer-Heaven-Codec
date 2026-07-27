@@ -1,3 +1,4 @@
+const socket = io();
 let currentUser = null;
 let currentChannel = 'allgemein';
 let currentVoiceChannel = null;
