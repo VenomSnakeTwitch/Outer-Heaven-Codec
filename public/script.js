@@ -198,7 +198,6 @@ function sendMessage() {
     const text = input.value.trim();
     if(!text) return;
     
-    // Sendet Nachricht an den Server (inklusive Benutzername und aktuellem Kanal)
     socket.emit('chat message', { 
         channel: currentChannel, 
         user: currentUser ? currentUser.username : 'Anonym',
@@ -207,18 +206,20 @@ function sendMessage() {
     input.value = '';
 }
 
-// Lädt den bisherigen Chatverlauf aus der Datenbank beim Verbinden
+// Chatverlauf laden (unterstützt universell user/username und text/message)
 socket.on('load_history', (messages) => {
     const container = document.getElementById('chat-messages');
     container.innerHTML = '';
     
     messages.forEach(msg => {
-        // Berücksichtigt Kanal-Trennung falls vorhanden, ansonsten direkt anzeigen
-        if (!msg.channel || msg.channel === currentChannel) {
+        const targetChannel = msg.channel || 'allgemein';
+        if (targetChannel === currentChannel) {
+            const userName = msg.user || msg.username || 'Unbekannt';
+            const msgText = msg.text || msg.message || '';
             container.innerHTML += `
                 <div class="message">
-                    <span class="msg-user">${msg.user}</span>
-                    <span class="msg-text">${msg.text}</span>
+                    <span class="msg-user">${userName}</span>
+                    <span class="msg-text">${msgText}</span>
                 </div>
             `;
         }
@@ -226,14 +227,17 @@ socket.on('load_history', (messages) => {
     container.scrollTop = container.scrollHeight;
 });
 
-// Empfängt neue Nachrichten in Echtzeit
+// Neue Nachrichten in Echtzeit empfangen
 socket.on('chat message', (msg) => {
-    if(!msg.channel || msg.channel === currentChannel) {
+    const targetChannel = msg.channel || 'allgemein';
+    if(targetChannel === currentChannel) {
         const container = document.getElementById('chat-messages');
+        const userName = msg.user || msg.username || 'Unbekannt';
+        const msgText = msg.text || msg.message || '';
         container.innerHTML += `
             <div class="message">
-                <span class="msg-user">${msg.user}</span>
-                <span class="msg-text">${msg.text}</span>
+                <span class="msg-user">${userName}</span>
+                <span class="msg-text">${msgText}</span>
             </div>
         `;
         container.scrollTop = container.scrollHeight;
