@@ -1,4 +1,3 @@
-const { app, BrowserWindow } = require('electron');
 const path = require('path');
 const https = require('https');
 
@@ -23,7 +22,7 @@ function createWindow() {
     const checkServer = () => {
         // Ignoriert SSL-Fehler beim internen Prüfen des lokalen Servers
         const agent = new https.Agent({ rejectUnauthorized: false });
-        
+
         https.get('https://localhost:3000', { agent }, (res) => {
             mainWindow.loadURL('https://localhost:3000');
         }).on('error', (err) => {
