@@ -157,6 +157,7 @@ function getVoiceChannelUsers(channelName) {
 }
 
 io.on('connection', (socket) => {
+    // Sende den gespeicherten Chatverlauf an den neu verbundenen Client[span_0](start_span)[span_0](end_span)
     socket.emit('load_history', db.messages);
 
     socket.on('set_user_info', (data) => {
@@ -306,6 +307,26 @@ io.on('connection', (socket) => {
         saveDatabase();
 
         if (typeof callback === 'function') callback({ success: true });
+    });
+
+    // --- Chat-Nachricht empfangen, in database.json speichern und verteilen ---
+    socket.on('chat message', (data) => {
+        const username = socket.username || data.user || 'Unbekannt';
+        const text = data.text || '';
+        const channel = data.channel || 'allgemein';
+
+        const chatMsg = {
+            channel: channel,
+            user: username,
+            text: text,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+
+        db.messages.push(chatMsg);
+        if (db.messages.length > 200) db.messages.shift(); // Maximal 200 Nachrichten aufbewahren
+        saveDatabase(); // Speichert die Änderung dauerhaft in database.json[span_1](start_span)[span_1](end_span)
+
+        io.emit('chat message', chatMsg);
     });
 
     socket.on('chat_message', (data) => {
