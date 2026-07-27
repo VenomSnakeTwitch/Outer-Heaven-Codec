@@ -157,7 +157,7 @@ function getVoiceChannelUsers(channelName) {
 }
 
 io.on('connection', (socket) => {
-    // Sende den gespeicherten Chatverlauf an den neu verbundenen Client[span_0](start_span)[span_0](end_span)
+    // Sende den gespeicherten Chatverlauf an den neu verbundenen Client
     socket.emit('load_history', db.messages);
 
     socket.on('set_user_info', (data) => {
@@ -309,28 +309,14 @@ io.on('connection', (socket) => {
         if (typeof callback === 'function') callback({ success: true });
     });
 
-    // --- Chat-Nachricht empfangen, in database.json speichern und verteilen ---
-    socket.on('chat message', (data) => {
-        const username = socket.username || data.user || 'Unbekannt';
-        const text = data.text || '';
+    // --- Einheitliche Nachrichten-Verarbeitung (unterstützt 'chat message' und 'chat_message') ---
+    socket.on('chat message', handleIncomingMessage);
+    socket.on('chat_message', handleIncomingMessage);
+
+    function handleIncomingMessage(data) {
+        const username = socket.username || data.user || data.username || 'Unbekannt';
+        let text = data.text || data.message || '';
         const channel = data.channel || 'allgemein';
-
-        const chatMsg = {
-            channel: channel,
-            user: username,
-            text: text,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        };
-
-        db.messages.push(chatMsg);
-        if (db.messages.length > 200) db.messages.shift(); // Maximal 200 Nachrichten aufbewahren
-        saveDatabase(); // Speichert die Änderung dauerhaft in database.json[span_1](start_span)[span_1](end_span)
-
-        io.emit('chat message', chatMsg);
-    });
-
-    socket.on('chat_message', (data) => {
-        let text = data.message || '';
 
         const urlRegex = /(https?:\/\/[^\s]+)/g;
         text = text.replace(urlRegex, (url) => {
@@ -351,18 +337,19 @@ io.on('connection', (socket) => {
         });
 
         const chatMsg = {
-            username: data.username,
-            message: text,
-            avatar: db.profiles[data.username]?.avatar || '/default-avatar.png',
+            channel: channel,
+            user: username,
+            text: text,
+            avatar: db.profiles[username]?.avatar || '/default-avatar.png',
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         };
 
         db.messages.push(chatMsg);
         if (db.messages.length > 200) db.messages.shift();
-        saveDatabase();
+        saveDatabase(); // Speichert die Änderung dauerhaft in database.json
 
-        io.emit('chat_message', chatMsg);
-    });
+        io.emit('chat message', chatMsg);
+    }
 
     socket.on('chat_media', (data) => {
         const { username, type, fileData, fileName: originalFileName } = data;
@@ -413,8 +400,9 @@ io.on('connection', (socket) => {
             }
 
             const chatMsg = {
-                username: username,
-                message: messageHTML,
+                channel: 'allgemein',
+                user: username,
+                text: messageHTML,
                 avatar: db.profiles[username]?.avatar || '/default-avatar.png',
                 timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             };
@@ -423,7 +411,7 @@ io.on('connection', (socket) => {
             if (db.messages.length > 200) db.messages.shift();
             saveDatabase();
 
-            io.emit('chat_message', chatMsg);
+            io.emit('chat message', chatMsg);
         } catch (err) {
             console.error('Fehler beim Speichern der Mediendatei:', err);
         }
