@@ -1,4 +1,3 @@
-const socket = io();
 let currentUser = null;
 let currentChannel = 'allgemein';
 let currentVoiceChannel = null;
@@ -109,7 +108,7 @@ async function loadAudioDevices() {
         const devices = await navigator.mediaDevices.enumerateDevices();
         const micSelect = document.getElementById('audio-input-select');
         const outputSelect = document.getElementById('audio-output-select');
-        
+
         if(micSelect) micSelect.innerHTML = '';
         if(outputSelect) outputSelect.innerHTML = '';
 
@@ -140,14 +139,14 @@ async function testMicrophone() {
                 autoGainControl: true
             }
         });
-        
+
         status.innerText = 'Test läuft... Sprich ins Mikrofon!';
         status.style.color = '#2ecc71';
-        
+
         const testAudio = document.createElement('audio');
         testAudio.srcObject = stream;
         testAudio.autoplay = true;
-        
+
         setTimeout(() => {
             stream.getTracks().forEach(t => t.stop());
             testAudio.remove();
@@ -218,7 +217,7 @@ socket.on('chat message', (msg) => {
 async function joinVoiceChannel(channelName) {
     if(currentVoiceChannel || activeCallTarget) leaveVoiceChannel();
     currentVoiceChannel = channelName;
-    
+
     document.getElementById('chat-messages').style.display = 'none';
     document.getElementById('chat-input-area-box').style.display = 'none';
     document.getElementById('video-grid').style.display = 'grid';
@@ -259,7 +258,7 @@ socket.on('direct_call_ended', () => {
 // --- GEMEINSAME AUDIO-ENGINE ---
 async function startAudioStreamEngine(targetRoom, mode) {
     const selectedMicId = document.getElementById('audio-input-select')?.value;
-    
+
     try {
         localStream = await navigator.mediaDevices.getUserMedia({ 
             audio: {
@@ -277,7 +276,7 @@ async function startAudioStreamEngine(targetRoom, mode) {
             monitoringAudio.srcObject = localStream;
             monitoringAudio.autoplay = true;
             monitoringAudio.muted = false;
-            
+
             const selectedOutputId = document.getElementById('audio-output-select')?.value;
             if (selectedOutputId && typeof monitoringAudio.setSinkId === 'function') {
                 monitoringAudio.setSinkId(selectedOutputId).catch(err => console.log('Monitoring SinkId Fehler:', err));
@@ -288,11 +287,11 @@ async function startAudioStreamEngine(targetRoom, mode) {
         audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
         sourceNode = audioContext.createMediaStreamSource(localStream);
         processorNode = audioContext.createScriptProcessor(2048, 1, 1);
-        
+
         processorNode.onaudioprocess = (e) => {
             const inputData = e.inputBuffer.getChannelData(0);
             const bufferCopy = new Float32Array(inputData);
-            
+
             if (mode === 'channel' && currentVoiceChannel) {
                 socket.emit('voice data', {
                     channel: currentVoiceChannel,
@@ -337,7 +336,7 @@ function leaveVoiceChannel() {
         monitoringAudio = null;
     }
     document.getElementById('video-grid').innerHTML = '';
-    
+
     if (currentVoiceChannel) {
         socket.emit('leave_voice_channel');
         currentVoiceChannel = null;
@@ -363,16 +362,16 @@ function playIncomingAudio(bufferArray) {
     try {
         const playCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
         const floatData = new Float32Array(bufferArray);
-        
+
         const audioBuffer = playCtx.createBuffer(1, floatData.length, playCtx.sampleRate);
         audioBuffer.copyToChannel(floatData, 0);
 
         const source = playCtx.createBufferSource();
         source.buffer = audioBuffer;
-        
+
         const selectedOutputId = document.getElementById('audio-output-select')?.value;
         const destination = playCtx.destination;
-        
+
         source.connect(destination);
         source.start();
     } catch(e) {
