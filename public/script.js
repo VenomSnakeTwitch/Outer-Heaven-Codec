@@ -206,14 +206,15 @@ function sendMessage() {
     input.value = '';
 }
 
-// Chatverlauf laden (unterstützt universell user/username und text/message)
+// Chatverlauf laden (unterstützt universell alle Schlüssel-Varianten)
 socket.on('load_history', (messages) => {
     const container = document.getElementById('chat-messages');
     container.innerHTML = '';
     
     messages.forEach(msg => {
         const targetChannel = msg.channel || 'allgemein';
-        if (targetChannel === currentChannel) {
+        // Zeigt die Nachrichten des aktuellen Kanals an (oder fallback auf 'allgemein', falls kein Kanal gesetzt war)
+        if (targetChannel === currentChannel || (!msg.channel && currentChannel === 'allgemein')) {
             const userName = msg.user || msg.username || 'Unbekannt';
             const msgText = msg.text || msg.message || '';
             container.innerHTML += `
