@@ -39,7 +39,7 @@
                 <h3>Profil</h3>
                 <label>Avatar Bild-URL:</label>
                 <input type="text" id="setting-avatar" placeholder="https://beispiel.de/bild.png">
-                
+
                 <label>Oder Bild hochladen:</label>
                 <input type="file" id="avatar-file-input" accept="image/*">
 
@@ -50,7 +50,7 @@
                     <option value="codec">Codec Grün</option>
                 </select>
             </div>
-            
+
             <div class="settings-section">
                 <h3>Audio Geräte</h3>
                 <label>Mikrofon:</label>
@@ -59,7 +59,7 @@
                 <select id="audio-output-select"></select>
                 <button class="control-btn" onclick="testMicrophone()">Mikrofon testen</button>
                 <span id="mic-test-status" style="font-size: 12px; margin-top: 5px;"></span>
-                
+
                 <label style="margin-top: 10px;">
                     <input type="checkbox" id="monitoring-toggle"> Mich selbst hören (Monitoring)
                 </label>
@@ -79,7 +79,7 @@
             <img id="modal-avatar" src="" alt="Avatar" style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover; margin: 10px auto; border: 2px solid #2ecc71;">
             <p style="color: #b9bbbe;"><strong>Rang:</strong> <span id="modal-rank" style="color: #fff;">Agent</span></p>
             <p style="color: #b9bbbe;"><strong>Bio:</strong> <span id="modal-bio-text" style="color: #fff;">Keine Bio hinterlegt.</span></p>
-            
+
             <button id="modal-friend-action-btn" class="control-btn" style="width: 100%; margin-top: 10px; background: #2ecc71;" onclick="handleProfileFriendAction()">Als Freund hinzufügen</button>
             <button class="control-btn" style="background: #ed4245; width: 100%; margin-top: 10px;" onclick="closeProfileModal()">Schließen</button>
         </div>
@@ -135,14 +135,14 @@
         </div>
 
         <div id="chat-messages" class="chat-messages"></div>
-        
+
         <!-- Raster für reine Audio-/Namensteilnehmer -->
         <div id="video-grid" style="display: none;"></div>
 
         <div class="chat-input-area" id="chat-input-area-box" style="display: flex; flex-direction: column; gap: 5px; padding: 10px;">
             <div class="chat-input-wrapper" style="display: flex; gap: 5px; width: 100%;">
                 <input type="text" id="msg-input" placeholder="Nachricht an #allgemein senden..." onkeydown="checkSend(event)" style="flex: 1;">
-                
+
                 <label title="Bild senden" style="cursor: pointer; background: #2f3136; padding: 6px 10px; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #b9bbbe;">
                     📷 <input type="file" id="chat-image-input" accept="image/*" style="display: none;" onchange="sendImage(this)">
                 </label>
@@ -166,11 +166,11 @@
     <script src="script.js"></script>
     <script>
         socket.off('chat_message');
-        
+
         socket.on('chat_message', (data) => {
             const container = document.getElementById('chat-messages');
             if (!container) return;
-            
+
             const avatarHTML = data.avatar 
                 ? `<img src="${data.avatar}" style="width:24px; height:24px; border-radius:50%; vertical-align:middle; margin-right:5px; object-fit:cover;">` 
                 : '';
@@ -194,15 +194,15 @@
             const input = document.getElementById('msg-input');
             if (!input) return;
             const text = input.value.trim();
-            
+
             if (text !== '') {
                 const currentUserName = (typeof currentUser !== 'undefined' && currentUser.username) ? currentUser.username : (document.getElementById('user-name-disp')?.innerText || 'Agent');
-                
+
                 socket.emit('chat_message', {
                     username: currentUserName,
                     message: text
                 });
-                
+
                 input.value = '';
             }
         };
@@ -224,7 +224,7 @@
                 document.getElementById('modal-avatar').src = profile.avatar || 'https://via.placeholder.com/80';
                 document.getElementById('modal-rank').innerText = profile.rank || 'Agent';
                 document.getElementById('modal-bio-text').innerText = profile.bio || 'Keine Bio angegeben.';
-                
+
                 const actionBtn = document.getElementById('modal-friend-action-btn');
                 if (username === currentUserName) {
                     actionBtn.style.display = 'none';
@@ -331,7 +331,7 @@
             socket.emit('get_friends', currentUserName, (friends) => {
                 const container = document.getElementById('friends-list');
                 if (!container) return;
-                
+
                 container.innerHTML = '';
                 if (!friends || friends.length === 0) {
                     container.innerHTML = '<div style="color: #888; font-size: 11px; padding: 2px 0;">Keine Freunde.</div>';
@@ -518,19 +518,19 @@
 
         window.openSettings = function() {
             document.getElementById('settings-modal').style.display = 'flex';
-            
+
             navigator.mediaDevices.enumerateDevices().then(devices => {
                 const micSelect = document.getElementById('audio-input-select');
                 const outSelect = document.getElementById('audio-output-select');
-                
+
                 micSelect.innerHTML = '';
                 outSelect.innerHTML = '';
-                
+
                 devices.forEach(device => {
                     const option = document.createElement('option');
                     option.value = device.deviceId;
                     option.text = device.label || (device.kind === 'audioinput' ? 'Mikrofon' : 'Lautsprecher');
-                    
+
                     if (device.kind === 'audioinput') {
                         micSelect.appendChild(option);
                     } else if (device.kind === 'audiooutput') {
@@ -570,7 +570,7 @@
                 const reader = new FileReader();
                 reader.onload = function(event) {
                     const imageBase64 = event.target.result;
-                    
+
                     fetch('/api/upload-avatar', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
