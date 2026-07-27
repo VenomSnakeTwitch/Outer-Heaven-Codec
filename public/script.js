@@ -197,12 +197,38 @@ function sendMessage() {
     const input = document.getElementById('msg-input');
     const text = input.value.trim();
     if(!text) return;
-    socket.emit('chat message', { channel: currentChannel, text });
+    
+    // Sendet Nachricht an den Server (inklusive Benutzername und aktuellem Kanal)
+    socket.emit('chat message', { 
+        channel: currentChannel, 
+        user: currentUser ? currentUser.username : 'Anonym',
+        text: text 
+    });
     input.value = '';
 }
 
+// Lädt den bisherigen Chatverlauf aus der Datenbank beim Verbinden
+socket.on('load_history', (messages) => {
+    const container = document.getElementById('chat-messages');
+    container.innerHTML = '';
+    
+    messages.forEach(msg => {
+        // Berücksichtigt Kanal-Trennung falls vorhanden, ansonsten direkt anzeigen
+        if (!msg.channel || msg.channel === currentChannel) {
+            container.innerHTML += `
+                <div class="message">
+                    <span class="msg-user">${msg.user}</span>
+                    <span class="msg-text">${msg.text}</span>
+                </div>
+            `;
+        }
+    });
+    container.scrollTop = container.scrollHeight;
+});
+
+// Empfängt neue Nachrichten in Echtzeit
 socket.on('chat message', (msg) => {
-    if(msg.channel === currentChannel) {
+    if(!msg.channel || msg.channel === currentChannel) {
         const container = document.getElementById('chat-messages');
         container.innerHTML += `
             <div class="message">
