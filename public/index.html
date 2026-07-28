@@ -14,7 +14,6 @@
             <input type="text" id="username" placeholder="Benutzername">
             <input type="password" id="passwort" placeholder="Passwort">
             
-            <!-- Admin-Schlüssel Feld (wird bei Registrierung dynamisch angezeigt) -->
             <input type="password" id="admin-secret-input" placeholder="Admin-Schlüssel (optional)" style="display:none;">
 
             <button id="auth-submit-btn" onclick="handleAuth()">Einloggen</button>
@@ -35,19 +34,28 @@
         </div>
     </div>
 
-    <!-- NEU HINZUGEFÜGT: Admin-Zusatzmenü Modal -->
+    <!-- Admin-Zusatzmenü Modal mit Berechtigungs-Checkboxen -->
     <div id="admin-menu-modal" class="modal" style="display:none;">
-        <div class="modal-content" style="width: 450px;">
+        <div class="modal-content" style="width: 480px; max-height: 85vh; overflow-y: auto;">
             <h2>Admin Management</h2>
             <div class="settings-section">
-                <h3>Rollen verwalten & erstellen</h3>
-                <label>Neue Rolle erstellen:</label>
-                <div style="display: flex; gap: 5px;">
-                    <input type="text" id="new-role-name" placeholder="Rollenname">
-                    <button class="control-btn" style="background: #5865f2;" onclick="createNewRole()">Erstellen</button>
+                <h3>Rolle erstellen & Berechtigungen zuweisen</h3>
+                <label>Rollenname:</label>
+                <input type="text" id="new-role-name" placeholder="z. B. Moderator, Supporter">
+                
+                <label style="margin-top: 10px; display: block; font-weight: bold; color: #b9bbbe;">Berechtigungen wählen:</label>
+                <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 5px; background: #202225; padding: 10px; border-radius: 4px;">
+                    <label><input type="checkbox" class="role-perm-cb" value="kick"> Nutzer aus Kanälen kicken</label>
+                    <label><input type="checkbox" class="role-perm-cb" value="ban"> Nutzer vom Server bannen</label>
+                    <label><input type="checkbox" class="role-perm-cb" value="delete_messages"> Nachrichten löschen</label>
+                    <label><input type="checkbox" class="role-perm-cb" value="mark_messages"> Nachrichten als wichtig markieren</label>
+                    <label><input type="checkbox" class="role-perm-cb" value="create_channel"> Neue Kanäle erstellen</label>
+                    <label><input type="checkbox" class="role-perm-cb" value="manage_roles"> Andere Rollen verwalten</label>
                 </div>
+                <button class="control-btn" style="background: #5865f2; margin-top: 10px; width: 100%;" onclick="createNewRole()">Rolle mit Berechtigungen erstellen</button>
             </div>
-            <div class="settings-section">
+
+            <div class="settings-section" style="margin-top: 15px;">
                 <h3>Nutzer Rollen zuweisen</h3>
                 <label>Benutzername:</label>
                 <input type="text" id="admin-target-user" placeholder="Exakter Benutzername">
@@ -57,9 +65,9 @@
                     <option value="Mod">Mod</option>
                     <option value="Agent">Agent</option>
                 </select>
-                <button class="control-btn" style="background: #2ecc71; margin-top: 5px;" onclick="assignUserRole()">Rolle speichern</button>
+                <button class="control-btn" style="background: #2ecc71; margin-top: 8px; width: 100%;" onclick="assignUserRole()">Rolle speichern</button>
             </div>
-            <div class="modal-buttons">
+            <div class="modal-buttons" style="margin-top: 15px;">
                 <button class="control-btn" onclick="closeAdminMenu()">Schließen</button>
             </div>
         </div>
@@ -106,7 +114,7 @@
         </div>
     </div>
 
-    <!-- Benutzer-Profil Modal beim Klick auf einen Namen -->
+    <!-- Benutzer-Profil Modal -->
     <div id="user-profile-modal" class="modal" style="display:none;">
         <div class="modal-content" style="width: 300px; text-align: center;">
             <h3 id="modal-username">User Profil</h3>
@@ -143,7 +151,6 @@
                 <div class="channel-item" onclick="joinVoiceChannel('Lobby')">🔊 Lobby</div>
             </div>
 
-            <!-- NEU HINZUGEFÜGT: Admin-Menü Button in der Sidebar für Admins -->
             <button id="admin-menu-btn" class="control-btn" style="background: #e67e22; width: 100%; margin-top: 10px; display: none; font-size: 11px;" onclick="openAdminMenu()">Admin-Menü</button>
 
             <div class="section-title" style="margin-top: 15px; color: #f1c40f;">Anfragen</div>
@@ -178,14 +185,12 @@
 
         <div id="chat-messages" class="chat-messages"></div>
 
-        <!-- Raster für reine Audio-/Namensteilnehmer -->
         <div id="video-grid" style="display: none;"></div>
 
         <div class="chat-input-area" id="chat-input-area-box" style="display: flex; flex-direction: column; gap: 5px; padding: 10px;">
             <div class="chat-input-wrapper" style="display: flex; gap: 5px; width: 100%;">
                 <input type="text" id="msg-input" placeholder="Nachricht an #allgemein senden..." onkeydown="checkSend(event)" style="flex: 1;">
 
-                <!-- Allgemeiner Upload-Button für Bilder, Audio und Videos (bis 3 GB) -->
                 <label title="Datei senden (Bild, Audio, Video bis 3GB)" style="cursor: pointer; background: #2f3136; padding: 6px 10px; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #b9bbbe;">
                     📁 <input type="file" id="general-file-input" accept="image/*,audio/*,video/*" style="display: none;" onchange="handleGeneralUpload(this)">
                 </label>
@@ -200,7 +205,6 @@
         </div>
     </div>
 
-    <!-- NEU HINZUGEFÜGT: Rechte Nutzerliste für Online-Status -->
     <div style="width: 200px; background: #2f3136; border-left: 1px solid #202225; display: flex; flex-direction: column;">
         <div style="padding: 15px; font-weight: bold; color: #8e9297; font-size: 12px; border-bottom: 2px solid #202225;">ONLINE USERS</div>
         <div id="online-users-list" style="flex: 1; padding: 10px; overflow-y: auto;">
@@ -208,7 +212,6 @@
         </div>
     </div>
 
-    <!-- Socket.io & Skripte -->
     <script src="/socket.io/socket.io.js"></script>
     <script src="script.js"></script>
     <script>
@@ -341,7 +344,6 @@
             }
         }
 
-        // --- NEU HINZUGEFÜGT: Admin-Menü Frontend Funktionen ---
         function openAdminMenu() {
             document.getElementById('admin-menu-modal').style.display = 'flex';
             socket.emit('get_roles_data', (res) => {
@@ -362,9 +364,15 @@
         function createNewRole() {
             const roleName = document.getElementById('new-role-name').value.trim();
             if (!roleName) return alert('Bitte Rollennamen eingeben.');
-            socket.emit('create_role', { roleName, permissions: ['all'] }, () => {
-                alert('Rolle erfolgreich erstellt!');
+
+            // Alle angehakten Checkboxen einsammeln
+            const checkboxes = document.querySelectorAll('.role-perm-cb:checked');
+            const permissions = Array.from(checkboxes).map(cb => cb.value);
+
+            socket.emit('create_role', { roleName, permissions }, () => {
+                alert(`Rolle "${roleName}" mit ausgewählten Berechtigungen erstellt!`);
                 document.getElementById('new-role-name').value = '';
+                checkboxes.forEach(cb => cb.checked = false);
                 openAdminMenu();
             });
         }
@@ -548,11 +556,10 @@
 
         setInterval(loadFriendsAndRequests, 3000);
 
-        // Universelle Upload-Funktion mit integrierter Größenprüfung (Max. 3 GB)
         function handleGeneralUpload(input) {
             if (input.files && input.files[0]) {
                 const file = input.files[0];
-                const maxSize = 3 * 1024 * 1024 * 1024; // 3 GB in Bytes
+                const maxSize = 3 * 1024 * 1024 * 1024;
 
                 if (file.size > maxSize) {
                     alert('Die Datei ist zu groß! Die maximale Dateigröße beträgt 3 GB.');
