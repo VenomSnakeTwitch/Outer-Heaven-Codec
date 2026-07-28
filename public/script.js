@@ -160,7 +160,11 @@ async function testMicrophone() {
 }
 
 socket.on('init state', (data) => {
-    renderChannels(data.channels);
+    if (data.channels) renderChannels(data.channels);
+    if (data.messages) {
+        window.allLoadedMessages = data.messages;
+        renderMessagesForCurrentChannel();
+    }
 });
 
 function renderChannels(channels) {
@@ -187,21 +191,21 @@ function switchChannel(type, name) {
         document.getElementById('video-grid').style.display = 'none';
         document.getElementById('leave-voice-btn').style.display = 'none';
         
-        // Placeholder im Eingabefeld anpassen
         document.getElementById('msg-input').placeholder = `Nachricht an #${name} senden...`;
 
-        // Verlauf für diesen spezifischen Kanal neu rendern
+        // UI Aktualisieren für aktiven Kanal
+        socket.emit('get_channels', (channels) => {
+            renderChannels(channels);
+        });
+
         renderMessagesForCurrentChannel();
     }
 }
 
-// Hilfsfunktion, die nur die Nachrichten des aktuellen Kanals anzeigt
 function renderMessagesForCurrentChannel() {
     const container = document.getElementById('chat-messages');
     container.innerHTML = '';
     
-    // Wir filtern aus dem globalen Array oder lassen den Server senden
-    // Da der Server alle schickt, filtern wir hier strikt nach Kanal:
     window.allLoadedMessages = window.allLoadedMessages || [];
     
     window.allLoadedMessages.forEach(msg => {
@@ -226,25 +230,39 @@ function appendMessageToDOM(msg) {
     `;
 }
 
-// Chatverlauf vom Server empfangen und zwischenspeichern
 socket.on('load_history', (messages) => {
     window.allLoadedMessages = messages;
     renderMessagesForCurrentChannel();
 });
 
-// Neue Nachrichten in Echtzeit empfangen
 socket.on('chat message', (msg) => {
     window.allLoadedMessages = window.allLoadedMessages || [];
     window.allLoadedMessages.push(msg);
 
     const targetChannel = msg.channel || 'allgemein';
-    // Nur anzeigen, wenn man sich gerade in diesem Kanal befindet
     if (targetChannel === currentChannel) {
         appendMessageToDOM(msg);
         const container = document.getElementById('chat-messages');
         container.scrollTop = container.scrollHeight;
     }
 });
+
+function checkSend(e) {
+    if (e.key === 'Enter') sendMessage();
+}
+
+function sendMessage() {
+    const input = document.getElementById('msg-input');
+    const text = input.value.trim();
+    if(!text) return;
+    
+    socket.emit('chat message', { 
+        channel: currentChannel, 
+        user: currentUser ? currentUser.username : 'Anonym',
+        text: text 
+    });
+    input.value = '';
+}
 
 // --- SPRACHKANAL BEITRETEN ---
 async function joinVoiceChannel(channelName) {
@@ -288,7 +306,6 @@ socket.on('direct_call_ended', () => {
     leaveVoiceChannel();
 });
 
-// --- GEMEINSAME AUDIO-ENGINE ---
 async function startAudioStreamEngine(targetRoom, mode) {
     const selectedMicId = document.getElementById('audio-input-select')?.value;
 
