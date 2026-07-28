@@ -541,6 +541,15 @@ app.get('/api/view-db', (req, res) => {
         res.status(404).json({ success: false, message: 'Keine database.json gefunden.' });
     }
 });
+app.get('/api/view-messages', (req, res) => {
+    if (fs.existsSync(messagesFile)) {
+        const data = fs.readFileSync(messagesFile, 'utf8');
+        res.setHeader('Content-Type', 'application/json');
+        res.send(data);
+    } else {
+        res.status(404).json({ success: false, message: 'Keine messages.json gefunden.' });
+    }
+});
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
