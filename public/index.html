@@ -4,6 +4,60 @@
     <meta charset="UTF-8">
     <title>Outer Heaven Codec</title>
     <link rel="stylesheet" href="style.css">
+    <style>
+        /* Zusätzlicher Stil für das Privatchat-Fenster */
+        #private-chat-container {
+            position: fixed;
+            bottom: 20px;
+            right: 220px;
+            width: 320px;
+            height: 400px;
+            background: #36393f;
+            border: 1px solid #202225;
+            border-radius: 8px 8px 0 0;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+            z-index: 1000;
+            overflow: hidden;
+        }
+        .private-chat-header {
+            background: #2f3136;
+            padding: 10px;
+            font-weight: bold;
+            color: #fff;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #202225;
+            cursor: pointer;
+        }
+        .private-chat-messages {
+            flex: 1;
+            padding: 10px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            font-size: 13px;
+        }
+        .private-chat-input-area {
+            padding: 10px;
+            background: #2f3136;
+            display: flex;
+            gap: 5px;
+            border-top: 1px solid #202225;
+        }
+        .private-chat-input-area input {
+            flex: 1;
+            background: #40444b;
+            border: none;
+            padding: 6px;
+            color: #fff;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+    </style>
 </head>
 <body>
 
@@ -34,7 +88,7 @@
         </div>
     </div>
 
-    <!-- Admin-Zusatzmenü Modal mit Berechtigungs-Checkboxen -->
+    <!-- Admin-Zusatzmenü Modal -->
     <div id="admin-menu-modal" class="modal" style="display:none;">
         <div class="modal-content" style="width: 480px; max-height: 85vh; overflow-y: auto;">
             <h2>Admin Management</h2>
@@ -127,8 +181,22 @@
                 <button class="control-btn" style="background: #ed4245; width: 100%; font-size: 11px;" onclick="adminBanUserPrompt()">Vom Server bannen</button>
             </div>
 
-            <button id="modal-friend-action-btn" class="control-btn" style="width: 100%; margin-top: 10px; background: #2ecc71;" onclick="handleProfileFriendAction()">Als Freund hinzufügen</button>
-            <button class="control-btn" style="background: #ed4245; width: 100%; margin-top: 10px;" onclick="closeProfileModal()">Schließen</button>
+            <button class="control-btn" style="background: #5865f2; width: 100%; margin-top: 10px;" onclick="openPrivateChatFromProfile()">Privatchat öffnen</button>
+            <button id="modal-friend-action-btn" class="control-btn" style="width: 100%; margin-top: 8px; background: #2ecc71;" onclick="handleProfileFriendAction()">Als Freund hinzufügen</button>
+            <button class="control-btn" style="background: #ed4245; width: 100%; margin-top: 8px;" onclick="closeProfileModal()">Schließen</button>
+        </div>
+    </div>
+
+    <!-- Dynamisches Privatchat-Fenster (Anfangs versteckt) -->
+    <div id="private-chat-container" style="display: none;">
+        <div class="private-chat-header">
+            <span id="private-chat-title">Direktnachricht</span>
+            <span onclick="closePrivateChat()" style="cursor: pointer; color: #b9bbbe; font-size: 14px;" title="Schließen">✖</span>
+        </div>
+        <div id="private-chat-messages" class="private-chat-messages"></div>
+        <div class="private-chat-input-area">
+            <input type="text" id="private-msg-input" placeholder="Nachricht schreiben..." onkeydown="checkSendPrivate(event)">
+            <button onclick="sendPrivateMessage()" style="background: #5865f2; border: none; color: #fff; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">Senden</button>
         </div>
     </div>
 
@@ -255,6 +323,94 @@
             logout();
         });
 
+        // --- Privatchat Funktionen ---
+        let activePrivateChatUser = null;
+        let privateMessagesStore = {}; // Speichert Nachrichten pro Nutzer
+
+        window.openPrivateChat = function(username) {
+            const currentUserName = (typeof currentUser !== 'undefined' && currentUser.username) ? currentUser.username : (document.getElementById('user-name-disp')?.innerText);
+            if (username === currentUserName) return;
+
+            activePrivateChatUser = username;
+            document.getElementById('private-chat-title').innerText = `Direktnachricht: ${username}`;
+            document.getElementById('private-chat-container').style.display = 'flex';
+            renderPrivateMessages();
+        }
+
+        window.closePrivateChat = function() {
+            document.getElementById('private-chat-container').style.display = 'none';
+            activePrivateChatUser = null;
+        }
+
+        window.openPrivateChatFromProfile = function() {
+            if (activeProfileUser) {
+                closeProfileModal();
+                openPrivateChat(activeProfileUser);
+            }
+        }
+
+        window.sendPrivateMessage = function() {
+            const input = document.getElementById('private-msg-input');
+            if (!input || !activePrivateChatUser) return;
+            const text = input.value.trim();
+            if (text === '') return;
+
+            socket.emit('private_message', {
+                recipient: activePrivateChatUser,
+                text: text
+            });
+
+            input.value = '';
+        }
+
+        window.checkSendPrivate = function(event) {
+            if (event.key === 'Enter') {
+                sendPrivateMessage();
+            }
+        }
+
+        socket.on('private_message', (msg) => {
+            const currentUserName = (typeof currentUser !== 'undefined' && currentUser.username) ? currentUser.username : (document.getElementById('user-name-disp')?.innerText);
+            const chatPartner = (msg.sender === currentUserName) ? msg.recipient : msg.sender;
+
+            if (!privateMessagesStore[chatPartner]) {
+                privateMessagesStore[chatPartner] = [];
+            }
+            if (!privateMessagesStore[chatPartner].some(m => m.id === msg.id)) {
+                privateMessagesStore[chatPartner].push(msg);
+            }
+
+            if (activePrivateChatUser === chatPartner) {
+                renderPrivateMessages();
+            }
+        });
+
+        function renderPrivateMessages() {
+            const container = document.getElementById('private-chat-messages');
+            if (!container || !activePrivateChatUser) return;
+
+            container.innerHTML = '';
+            const messages = privateMessagesStore[activePrivateChatUser] || [];
+
+            if (messages.length === 0) {
+                container.innerHTML = '<div style="color: #888; text-align: center; font-size: 11px; margin-top: 20px;">Noch keine Nachrichten. Schreibe etwas!</div>';
+                return;
+            }
+
+            const currentUserName = (typeof currentUser !== 'undefined' && currentUser.username) ? currentUser.username : (document.getElementById('user-name-disp')?.innerText);
+
+            messages.forEach(m => {
+                const isMe = m.sender === currentUserName;
+                container.innerHTML += `
+                    <div style="background: ${isMe ? '#2f3136' : '#40444b'}; padding: 6px 10px; border-radius: 6px; align-self: ${isMe ? 'flex-end' : 'flex-start'}; max-width: 85%;">
+                        <div style="font-size: 10px; color: #b9bbbe; margin-bottom: 2px;"><b>${m.sender}</b> - ${m.timestamp}</div>
+                        <div style="color: #fff; word-break: break-word;">${m.text}</div>
+                    </div>
+                `;
+            });
+            container.scrollTop = container.scrollHeight;
+        }
+
         window.sendMessage = function() {
             const input = document.getElementById('msg-input');
             if (!input) return;
@@ -365,7 +521,6 @@
             const roleName = document.getElementById('new-role-name').value.trim();
             if (!roleName) return alert('Bitte Rollennamen eingeben.');
 
-            // Alle angehakten Checkboxen einsammeln
             const checkboxes = document.querySelectorAll('.role-perm-cb:checked');
             const permissions = Array.from(checkboxes).map(cb => cb.value);
 
@@ -487,8 +642,9 @@
                 friends.forEach(friend => {
                     container.innerHTML += `
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 12px; background: rgba(255,255,255,0.05); padding: 3px 6px; border-radius: 3px;">
-                            <span onclick="openUserProfile('${friend}')" style="color: #2ecc71; cursor: pointer; text-decoration: underline;">${friend}</span>
+                            <span onclick="openUserProfile('${friend}')" style="color: #2ecc71; cursor: pointer; text-decoration: underline;" title="Profil anzeigen">${friend}</span>
                             <div style="display: flex; gap: 4px;">
+                                <button onclick="openPrivateChat('${friend}')" style="background: #5865f2; color: white; border: none; border-radius: 3px; cursor: pointer; padding: 1px 5px; font-size: 10px;" title="Privatchat">💬</button>
                                 <button onclick="startDirectCall('${friend}')" style="background: #2ecc71; color: white; border: none; border-radius: 3px; cursor: pointer; padding: 1px 5px; font-size: 10px;" title="Anrufen">📞</button>
                                 <button onclick="removeFriend('${friend}')" style="background: #ed4245; color: white; border: none; border-radius: 3px; cursor: pointer; padding: 1px 5px; font-size: 10px;" title="Entfernen">X</button>
                             </div>
