@@ -78,9 +78,12 @@ function saveMessages() {
     }
 }
 
-// --- HTTP-Registrierungs-Endpunkt ---
+// Geheimer Admin-Schlüssel für die Registrierung (kann hier angepasst werden)
+const ADMIN_SECRET_KEY = "admin123";
+
+// --- HTTP-Registrierungs-Endpunkt mit Admin-Unterstützung ---
 app.post('/api/register', (req, res) => {
-    const { username, password } = req.body;
+    const { username, password, adminSecret } = req.body;
 
     if (!username || !password) {
         return res.status(400).json({ success: false, message: 'Bitte Benutzername und Passwort eingeben.' });
@@ -90,10 +93,16 @@ app.post('/api/register', (req, res) => {
         return res.status(400).json({ success: false, message: 'Benutzer existiert bereits.' });
     }
 
+    // Rang-Zuweisung je nach Admin-Schlüssel
+    let assignedRank = 'Agent';
+    if (adminSecret && adminSecret === ADMIN_SECRET_KEY) {
+        assignedRank = 'Admin';
+    }
+
     db.profiles[username] = {
         username: username,
         password: password,
-        rank: 'Agent',
+        rank: assignedRank,
         bio: 'Keine Bio angegeben.',
         avatar: '/default-avatar.png',
         audioInputId: '',
@@ -101,7 +110,7 @@ app.post('/api/register', (req, res) => {
     };
 
     saveDatabase();
-    res.json({ success: true, message: 'Registrierung erfolgreich!' });
+    res.json({ success: true, message: `Registrierung als '${assignedRank}' erfolgreich!` });
 });
 
 // --- HTTP-Login-Endpunkt ---
@@ -216,6 +225,69 @@ io.on('connection', (socket) => {
 
         io.emit('init state', { channels: db.channels, messages: chatMessages });
         if (typeof callback === 'function') callback({ success: true });
+    });
+
+    // --- Admin-Berechtigungen (Kick & Ban) ---
+    socket.on('admin_kick', (data, callback) => {
+        const { targetUser } = data;
+        const senderProfile = db.profiles[socket.username];
+        if (!senderProfile || (senderProfile.rank !== 'Admin' && senderProfile.rank !== 'Mod')) {
+            if (typeof callback === 'function') callback({ success: false, message: 'Keine Berechtigung.' });
+            return;
+        }
+
+        for (let [id, s] of io.sockets.sockets) {
+            if (s.username === targetUser) {
+                s.emit('direct_call_ended'); // Erzwingt Verlassen von Räumen
+                s.disconnect(true);
+                break;
+            }
+        }
+        if (typeof callback === 'function') callback({ success: true, message: `${targetUser} wurde aus dem Kanal gekickt.` });
+    });
+
+    socket.on('admin_ban', (data, callback) => {
+        const { targetUser } = data;
+        const senderProfile = db.profiles[socket.username];
+        if (!senderProfile || senderProfile.rank !== 'Admin') {
+            if (typeof callback === 'function') callback({ success: false, message: 'Nur Admins können bannen.' });
+            return;
+        }
+
+        delete db.profiles[targetUser];
+        saveDatabase();
+
+        for (let [id, s] of io.sockets.sockets) {
+            if (s.username === targetUser) {
+                s.disconnect(true);
+                break;
+            }
+        }
+        if (typeof callback === 'function') callback({ success: true, message: `${targetUser} wurde dauerhaft gebannt.` });
+    });
+
+    // --- Nachrichten verwalten (Löschen & Markieren) ---
+    socket.on('delete_message', (data) => {
+        const { messageId } = data;
+        const senderProfile = db.profiles[socket.username];
+        if (!senderProfile || (senderProfile.rank !== 'Admin' && senderProfile.rank !== 'Mod')) return;
+
+        chatMessages = chatMessages.filter(m => m.id !== messageId);
+        saveMessages();
+        io.emit('message_deleted', { messageId });
+    });
+
+    socket.on('toggle_mark_message', (data) => {
+        const { messageId } = data;
+        const senderProfile = db.profiles[socket.username];
+        if (!senderProfile || (senderProfile.rank !== 'Admin' && senderProfile.rank !== 'Mod')) return;
+
+        const msg = chatMessages.find(m => m.id === messageId);
+        if (msg) {
+            msg.marked = !msg.marked;
+            saveMessages();
+            io.emit('message_marked', { messageId, marked: msg.marked });
+        }
     });
 
     // --- Sprachkanal & Audio-Streaming Events ---
@@ -359,10 +431,12 @@ io.on('connection', (socket) => {
         });
 
         const chatMsg = {
+            id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
             channel: channel,
             user: username,
             message: text,
             text: text,
+            marked: false,
             avatar: db.profiles[username]?.avatar || '/default-avatar.png',
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         };
@@ -425,10 +499,12 @@ io.on('connection', (socket) => {
             }
 
             const chatMsg = {
+                id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
                 channel: channel,
                 user: username,
                 message: messageHTML,
                 text: messageHTML,
+                marked: false,
                 avatar: db.profiles[username]?.avatar || '/default-avatar.png',
                 timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             };
