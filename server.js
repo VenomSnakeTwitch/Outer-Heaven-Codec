@@ -32,7 +32,14 @@ let db = {
     channels: {
         text: ['allgemein', 'gta-online'],
         voice: ['Lobby']
-    }
+    },
+    // NEU: Rollen und Berechtigungen
+    roles: {
+        'Admin': { permissions: ['kick', 'ban', 'manage_roles', 'delete_messages', 'mark_messages'] },
+        'Mod': { permissions: ['kick', 'delete_messages', 'mark_messages'] },
+        'Agent': { permissions: [] }
+    },
+    bans: {} // Speichert Banngründe: { username: grund }
 };
 
 if (fs.existsSync(dbFile)) {
@@ -43,6 +50,12 @@ if (fs.existsSync(dbFile)) {
         if (!db.friends) db.friends = {};
         if (!db.requests) db.requests = {};
         if (!db.channels) db.channels = { text: ['allgemein', 'gta-online'], voice: ['Lobby'] };
+        if (!db.roles) db.roles = {
+            'Admin': { permissions: ['kick', 'ban', 'manage_roles', 'delete_messages', 'mark_messages'] },
+            'Mod': { permissions: ['kick', 'delete_messages', 'mark_messages'] },
+            'Agent': { permissions: [] }
+        };
+        if (!db.bans) db.bans = {};
     } catch (err) {
         console.error('Fehler beim Laden der database.json:', err);
     }
@@ -89,6 +102,11 @@ app.post('/api/register', (req, res) => {
         return res.status(400).json({ success: false, message: 'Bitte Benutzername und Passwort eingeben.' });
     }
 
+    // Prüfen ob Nutzer gebannt ist
+    if (db.bans[username]) {
+        return res.status(403).json({ success: false, message: `Dieser Benutzer ist gebannt. Grund: ${db.bans[username]}` });
+    }
+
     if (db.profiles[username] && db.profiles[username].password) {
         return res.status(400).json({ success: false, message: 'Benutzer existiert bereits.' });
     }
@@ -119,6 +137,11 @@ app.post('/api/login', (req, res) => {
 
     if (!username || !password) {
         return res.status(400).json({ success: false, message: 'Bitte Benutzername und Passwort eingeben.' });
+    }
+
+    // Prüfen ob Nutzer gebannt ist
+    if (db.bans[username]) {
+        return res.status(403).json({ success: false, message: `Zugriff verweigert. Du wurdest gebannt. Grund: ${db.bans[username]}` });
     }
 
     const user = db.profiles[username];
@@ -186,21 +209,46 @@ function getVoiceChannelUsers(channelName) {
     return users;
 }
 
+// Hilfsfunktion zum Senden der aktuellen Online-Liste an alle Clients
+function broadcastOnlineUsers() {
+    const onlineUsers = [];
+    for (let [id, socket] of io.sockets.sockets) {
+        if (socket.username) {
+            onlineUsers.push({
+                username: socket.username,
+                role: db.profiles[socket.username]?.rank || 'Agent',
+                avatar: db.profiles[socket.username]?.avatar || '/default-avatar.png'
+            });
+        }
+    }
+    io.emit('update_online_users', onlineUsers);
+}
+
 io.on('connection', (socket) => {
     socket.emit('init state', {
         channels: db.channels,
-        messages: chatMessages
+        messages: chatMessages,
+        roles: db.roles
     });
     socket.emit('load_history', chatMessages);
 
     socket.on('set_user_info', (data) => {
         if (!data || !data.username) return;
+        
+        // Prüfen ob gebannt beim Verbinden
+        if (db.bans[data.username]) {
+            socket.emit('banned_notification', { reason: db.bans[data.username] });
+            socket.disconnect(true);
+            return;
+        }
+
         socket.username = data.username;
         db.profiles[data.username] = {
             ...(db.profiles[data.username] || {}),
             ...data
         };
         saveDatabase();
+        broadcastOnlineUsers();
     });
 
     socket.on('get_channels', (callback) => {
@@ -223,22 +271,91 @@ io.on('connection', (socket) => {
         db.channels[type].push(name);
         saveDatabase();
 
-        io.emit('init state', { channels: db.channels, messages: chatMessages });
+        io.emit('init state', { channels: db.channels, messages: chatMessages, roles: db.roles });
         if (typeof callback === 'function') callback({ success: true });
     });
 
-    // --- Admin-Berechtigungen (Kick & Ban) ---
+    // --- NEU: Admin-Rollen & Berechtigungen verwalten ---
+    socket.on('get_admin_data', (callback) => {
+        const senderProfile = db.profiles[socket.username];
+        if (!senderProfile || (senderProfile.rank !== 'Admin' && !db.roles[senderProfile.rank]?.permissions.includes('manage_roles'))) {
+            if (typeof callback === 'function') callback({ success: false });
+            return;
+        }
+        
+        const usersList = Object.keys(db.profiles).map(username => ({
+            username: username,
+            rank: db.profiles[username].rank || 'Agent'
+        }));
+
+        if (typeof callback === 'function') {
+            callback({
+                success: true,
+                roles: db.roles,
+                users: usersList
+            });
+        }
+    });
+
+    socket.on('admin_create_role', (data, callback) => {
+        const { roleName, permissions } = data;
+        const senderProfile = db.profiles[socket.username];
+        if (!senderProfile || (senderProfile.rank !== 'Admin' && !db.roles[senderProfile.rank]?.permissions.includes('manage_roles'))) {
+            if (typeof callback === 'function') callback({ success: false, message: 'Keine Berechtigung.' });
+            return;
+        }
+
+        if (!roleName) {
+            if (typeof callback === 'function') callback({ success: false, message: 'Rollenname ungültig.' });
+            return;
+        }
+
+        db.roles[roleName] = { permissions: permissions || [] };
+        saveDatabase();
+        if (typeof callback === 'function') callback({ success: true, message: `Rolle '${roleName}' erstellt.` });
+    });
+
+    socket.on('admin_update_user_role', (data, callback) => {
+        const { targetUser, newRole } = data;
+        const senderProfile = db.profiles[socket.username];
+        if (!senderProfile || (senderProfile.rank !== 'Admin' && !db.roles[senderProfile.rank]?.permissions.includes('manage_roles'))) {
+            if (typeof callback === 'function') callback({ success: false, message: 'Keine Berechtigung.' });
+            return;
+        }
+
+        if (!db.profiles[targetUser] || !db.roles[newRole]) {
+            if (typeof callback === 'function') callback({ success: false, message: 'Benutzer oder Rolle existiert nicht.' });
+            return;
+        }
+
+        db.profiles[targetUser].rank = newRole;
+        saveDatabase();
+
+        // Update live status for target user if connected
+        for (let [id, s] of io.sockets.sockets) {
+            if (s.username === targetUser) {
+                s.emit('role_updated', { newRole });
+                break;
+            }
+        }
+
+        broadcastOnlineUsers();
+        if (typeof callback === 'function') callback({ success: true, message: `Rolle von ${targetUser} zu '${newRole}' geändert.` });
+    });
+
+    // --- Admin-Berechtigungen (Kick & Ban mit Grund) ---
     socket.on('admin_kick', (data, callback) => {
         const { targetUser } = data;
         const senderProfile = db.profiles[socket.username];
-        if (!senderProfile || (senderProfile.rank !== 'Admin' && senderProfile.rank !== 'Mod')) {
+        const senderRolePerms = db.roles[senderProfile?.rank]?.permissions || [];
+        if (!senderProfile || (senderProfile.rank !== 'Admin' && senderProfile.rank !== 'Mod' && !senderRolePerms.includes('kick'))) {
             if (typeof callback === 'function') callback({ success: false, message: 'Keine Berechtigung.' });
             return;
         }
 
         for (let [id, s] of io.sockets.sockets) {
             if (s.username === targetUser) {
-                s.emit('direct_call_ended'); // Erzwingt Verlassen von Räumen
+                s.emit('direct_call_ended'); 
                 s.disconnect(true);
                 break;
             }
@@ -247,30 +364,36 @@ io.on('connection', (socket) => {
     });
 
     socket.on('admin_ban', (data, callback) => {
-        const { targetUser } = data;
+        const { targetUser, reason } = data;
         const senderProfile = db.profiles[socket.username];
-        if (!senderProfile || senderProfile.rank !== 'Admin') {
+        const senderRolePerms = db.roles[senderProfile?.rank]?.permissions || [];
+        if (!senderProfile || (senderProfile.rank !== 'Admin' && !senderRolePerms.includes('ban'))) {
             if (typeof callback === 'function') callback({ success: false, message: 'Nur Admins können bannen.' });
             return;
         }
 
+        const banReason = reason || 'Kein Grund angegeben.';
+        db.bans[targetUser] = banReason;
         delete db.profiles[targetUser];
         saveDatabase();
 
         for (let [id, s] of io.sockets.sockets) {
             if (s.username === targetUser) {
+                s.emit('banned_notification', { reason: banReason });
                 s.disconnect(true);
                 break;
             }
         }
-        if (typeof callback === 'function') callback({ success: true, message: `${targetUser} wurde dauerhaft gebannt.` });
+        broadcastOnlineUsers();
+        if (typeof callback === 'function') callback({ success: true, message: `${targetUser} wurde dauerhaft gebannt. Grund: ${banReason}` });
     });
 
     // --- Nachrichten verwalten (Löschen & Markieren) ---
     socket.on('delete_message', (data) => {
         const { messageId } = data;
         const senderProfile = db.profiles[socket.username];
-        if (!senderProfile || (senderProfile.rank !== 'Admin' && senderProfile.rank !== 'Mod')) return;
+        const senderPerms = db.roles[senderProfile?.rank]?.permissions || [];
+        if (!senderProfile || (senderProfile.rank !== 'Admin' && senderProfile.rank !== 'Mod' && !senderPerms.includes('delete_messages'))) return;
 
         chatMessages = chatMessages.filter(m => m.id !== messageId);
         saveMessages();
@@ -280,7 +403,8 @@ io.on('connection', (socket) => {
     socket.on('toggle_mark_message', (data) => {
         const { messageId } = data;
         const senderProfile = db.profiles[socket.username];
-        if (!senderProfile || (senderProfile.rank !== 'Admin' && senderProfile.rank !== 'Mod')) return;
+        const senderPerms = db.roles[senderProfile?.rank]?.permissions || [];
+        if (!senderProfile || (senderProfile.rank !== 'Admin' && senderProfile.rank !== 'Mod' && !senderPerms.includes('mark_messages'))) return;
 
         const msg = chatMessages.find(m => m.id === messageId);
         if (msg) {
@@ -387,6 +511,7 @@ io.on('connection', (socket) => {
                 }
             });
         }
+        broadcastOnlineUsers();
     });
 
     socket.on('set_audio_settings', (data, callback) => {
