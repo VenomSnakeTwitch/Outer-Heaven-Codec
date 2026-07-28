@@ -4,6 +4,7 @@ let currentChannel = 'allgemein';
 let currentVoiceChannel = null;
 let activeCallTarget = null;
 let isRegistering = false;
+let globalChannelsData = { text: ['allgemein', 'gta-online'], voice: ['Lobby'] };
 
 let localStream = null;
 let audioContext = null;
@@ -160,7 +161,10 @@ async function testMicrophone() {
 }
 
 socket.on('init state', (data) => {
-    if (data.channels) renderChannels(data.channels);
+    if (data.channels) {
+        globalChannelsData = data.channels;
+        renderChannels(globalChannelsData);
+    }
     if (data.messages) {
         window.allLoadedMessages = data.messages;
         renderMessagesForCurrentChannel();
@@ -168,13 +172,16 @@ socket.on('init state', (data) => {
 });
 
 function renderChannels(channels) {
+    globalChannelsData = channels;
     const textDiv = document.getElementById('text-channels');
     const voiceDiv = document.getElementById('voice-channels');
     textDiv.innerHTML = '';
     voiceDiv.innerHTML = '';
 
     channels.text.forEach(ch => {
-        textDiv.innerHTML += `<div class="channel-item ${currentChannel === ch ? 'active' : ''}" onclick="switchChannel('text', '${ch}')"># ${ch}</div>`;
+        // Visuelle Hervorhebung des aktiven Textkanals über die CSS-Klasse 'active'
+        const isActive = (currentChannel === ch);
+        textDiv.innerHTML += `<div class="channel-item ${isActive ? 'active' : ''}" onclick="switchChannel('text', '${ch}')"># ${ch}</div>`;
     });
 
     channels.voice.forEach(ch => {
@@ -193,11 +200,8 @@ function switchChannel(type, name) {
         
         document.getElementById('msg-input').placeholder = `Nachricht an #${name} senden...`;
 
-        // UI Aktualisieren für aktiven Kanal
-        socket.emit('get_channels', (channels) => {
-            renderChannels(channels);
-        });
-
+        // UI-Leiste sofort aktualisieren, damit die Markierung an der Seite sofort umschaltet
+        renderChannels(globalChannelsData);
         renderMessagesForCurrentChannel();
     }
 }
@@ -208,6 +212,7 @@ function renderMessagesForCurrentChannel() {
     
     window.allLoadedMessages = window.allLoadedMessages || [];
     
+    // Strenger Filter: Zeigt ausschließlich Nachrichten an, die exakt zu diesem Kanal gehören
     window.allLoadedMessages.forEach(msg => {
         const targetChannel = msg.channel || 'allgemein';
         if (targetChannel === currentChannel) {
@@ -240,6 +245,7 @@ socket.on('chat message', (msg) => {
     window.allLoadedMessages.push(msg);
 
     const targetChannel = msg.channel || 'allgemein';
+    // Nachricht nur rendern, wenn man gerade genau in diesem Kanal ist
     if (targetChannel === currentChannel) {
         appendMessageToDOM(msg);
         const container = document.getElementById('chat-messages');
