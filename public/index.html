@@ -35,50 +35,32 @@
         </div>
     </div>
 
-    <!-- NEU: Admin-Zusatzmenü Modal -->
-    <div id="admin-dashboard-modal" class="modal" style="display:none;">
-        <div class="modal-content" style="width: 600px;">
-            <h2>Admin Verwaltungs-Zusatzmenü</h2>
-            
+    <!-- NEU HINZUGEFÜGT: Admin-Zusatzmenü Modal -->
+    <div id="admin-menu-modal" class="modal" style="display:none;">
+        <div class="modal-content" style="width: 450px;">
+            <h2>Admin Management</h2>
             <div class="settings-section">
-                <h3>Rollen & Berechtigungen erstellen</h3>
-                <label>Neue Rolle Name:</label>
-                <input type="text" id="new-role-name-input" placeholder="z.B. ModeratorPlus">
-                <label style="margin-top: 5px;">Berechtigungen auswählen:</label>
-                <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 5px;">
-                    <label><input type="checkbox" class="perm-checkbox" value="kick"> Kicken</label>
-                    <label><input type="checkbox" class="perm-checkbox" value="ban"> Bannen</label>
-                    <label><input type="checkbox" class="perm-checkbox" value="manage_roles"> Rollen verwalten</label>
-                    <label><input type="checkbox" class="perm-checkbox" value="delete_messages"> Nachrichten löschen</label>
-                    <label><input type="checkbox" class="perm-checkbox" value="mark_messages"> Nachrichten markieren</label>
+                <h3>Rollen verwalten & erstellen</h3>
+                <label>Neue Rolle erstellen:</label>
+                <div style="display: flex; gap: 5px;">
+                    <input type="text" id="new-role-name" placeholder="Rollenname">
+                    <button class="control-btn" style="background: #5865f2;" onclick="createNewRole()">Erstellen</button>
                 </div>
-                <button class="control-btn" style="background: #2ecc71; margin-top: 10px;" onclick="createNewRole()">Rolle erstellen</button>
             </div>
-
-            <div class="settings-section" style="margin-top: 10px;">
+            <div class="settings-section">
                 <h3>Nutzer Rollen zuweisen</h3>
-                <div style="display: flex; gap: 10px;">
-                    <select id="admin-user-select" style="flex: 1; padding: 6px; background: #202225; color: #fff; border: 1px solid #444; border-radius: 4px;"></select>
-                    <select id="admin-role-select" style="flex: 1; padding: 6px; background: #202225; color: #fff; border: 1px solid #444; border-radius: 4px;"></select>
-                    <button class="control-btn" style="background: #5865f2;" onclick="assignUserRole()">Zuweisen</button>
-                </div>
+                <label>Benutzername:</label>
+                <input type="text" id="admin-target-user" placeholder="Exakter Benutzername">
+                <label>Rolle zuweisen:</label>
+                <select id="admin-role-select">
+                    <option value="Admin">Admin</option>
+                    <option value="Mod">Mod</option>
+                    <option value="Agent">Agent</option>
+                </select>
+                <button class="control-btn" style="background: #2ecc71; margin-top: 5px;" onclick="assignUserRole()">Rolle speichern</button>
             </div>
-
-            <div class="modal-buttons" style="margin-top: 15px;">
-                <button class="control-btn" onclick="closeAdminDashboard()">Schließen</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- NEU: Ban-Grund Abfrage Modal -->
-    <div id="ban-reason-modal" class="modal" style="display:none;">
-        <div class="modal-content" style="width: 350px;">
-            <h3 id="ban-modal-title">Nutzer bannen</h3>
-            <label>Gib den Banngrund ein:</label>
-            <input type="text" id="ban-reason-input" placeholder="z.B. Spam / Fehlverhalten">
             <div class="modal-buttons">
-                <button class="control-btn" onclick="closeBanReasonModal()">Abbrechen</button>
-                <button class="control-btn" style="background: #ed4245;" onclick="submitUserBan()">Dauerhaft bannen</button>
+                <button class="control-btn" onclick="closeAdminMenu()">Schließen</button>
             </div>
         </div>
     </div>
@@ -134,7 +116,7 @@
 
             <div id="admin-actions-container" style="margin-top: 10px; display: none; flex-direction: column; gap: 5px;">
                 <button class="control-btn" style="background: #e67e22; width: 100%; font-size: 11px;" onclick="adminKickUser()">Aus Kanal kicken</button>
-                <button class="control-btn" style="background: #ed4245; width: 100%; font-size: 11px;" onclick="openBanReasonModalForUser()">Vom Server bannen</button>
+                <button class="control-btn" style="background: #ed4245; width: 100%; font-size: 11px;" onclick="adminBanUserPrompt()">Vom Server bannen</button>
             </div>
 
             <button id="modal-friend-action-btn" class="control-btn" style="width: 100%; margin-top: 10px; background: #2ecc71;" onclick="handleProfileFriendAction()">Als Freund hinzufügen</button>
@@ -144,11 +126,7 @@
 
     <!-- Haupt-App -->
     <div class="sidebar">
-        <div class="sidebar-header" style="display: flex; justify-content: space-between; align-items: center;">
-            <span>OUTER HEAVEN</span>
-            <!-- NEU: Admin Menü Button (wird dynamisch eingeblendet) -->
-            <button id="open-admin-dashboard-btn" onclick="openAdminDashboard()" style="display:none; background: #f1c40f; border:none; border-radius:3px; padding:2px 6px; font-size:10px; font-weight:bold; cursor:pointer;" title="Admin Dashboard">⚙️ Admin</button>
-        </div>
+        <div class="sidebar-header">OUTER HEAVEN</div>
         <div class="channels-list">
             <div class="section-title">
                 Textkanäle
@@ -164,6 +142,9 @@
             <div id="voice-channels">
                 <div class="channel-item" onclick="joinVoiceChannel('Lobby')">🔊 Lobby</div>
             </div>
+
+            <!-- NEU HINZUGEFÜGT: Admin-Menü Button in der Sidebar für Admins -->
+            <button id="admin-menu-btn" class="control-btn" style="background: #e67e22; width: 100%; margin-top: 10px; display: none; font-size: 11px;" onclick="openAdminMenu()">Admin-Menü</button>
 
             <div class="section-title" style="margin-top: 15px; color: #f1c40f;">Anfragen</div>
             <div id="friend-requests-list" style="padding: 0 5px; max-height: 100px; overflow-y: auto;">
@@ -189,44 +170,41 @@
         </div>
     </div>
 
-    <div class="main-content" style="display: flex; flex-direction: row; flex: 1;">
-        <!-- Chat & Hauptbereich -->
-        <div style="flex: 1; display: flex; flex-direction: column; background: #36393f;">
-            <div class="chat-header">
-                <span id="current-channel-title"># allgemein</span>
-                <button id="leave-voice-btn" class="control-btn active" style="display:none; margin-left: auto;" onclick="leaveVoiceChannel()">Verbindung verlassen</button>
-            </div>
-
-            <div id="chat-messages" class="chat-messages"></div>
-
-            <!-- Raster für reine Audio-/Namensteilnehmer -->
-            <div id="video-grid" style="display: none;"></div>
-
-            <div class="chat-input-area" id="chat-input-area-box" style="display: flex; flex-direction: column; gap: 5px; padding: 10px;">
-                <div class="chat-input-wrapper" style="display: flex; gap: 5px; width: 100%;">
-                    <input type="text" id="msg-input" placeholder="Nachricht an #allgemein senden..." onkeydown="checkSend(event)" style="flex: 1;">
-
-                    <!-- Allgemeiner Upload-Button für Bilder, Audio und Videos (bis 3 GB) -->
-                    <label title="Datei senden (Bild, Audio, Video bis 3GB)" style="cursor: pointer; background: #2f3136; padding: 6px 10px; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #b9bbbe;">
-                        📁 <input type="file" id="general-file-input" accept="image/*,audio/*,video/*" style="display: none;" onchange="handleGeneralUpload(this)">
-                    </label>
-
-                    <button id="voice-record-btn" onclick="toggleVoiceRecording()" title="Sprachnachricht aufnehmen" style="cursor: pointer; background: #2f3136; border: 1px solid #444; border-radius: 4px; padding: 6px 10px; color: #b9bbbe;">
-                        🎤
-                    </button>
-
-                    <button class="send-btn" onclick="sendMessage()">Senden</button>
-                </div>
-                <div id="recording-status" style="font-size: 11px; color: #ed4245; display: none;">🔴 Aufnahme läuft... (Klicke erneut auf das Mikrofon zum Beenden)</div>
-            </div>
+    <div class="main-content">
+        <div class="chat-header">
+            <span id="current-channel-title"># allgemein</span>
+            <button id="leave-voice-btn" class="control-btn active" style="display:none; margin-left: auto;" onclick="leaveVoiceChannel()">Verbindung verlassen</button>
         </div>
 
-        <!-- NEU: Rechte Seite - Online-Nutzerliste -->
-        <div style="width: 220px; background: #2f3136; border-left: 1px solid #202225; display: flex; flex-direction: column; padding: 10px;">
-            <div style="font-size: 12px; font-weight: bold; color: #8e9297; text-transform: uppercase; margin-bottom: 10px;">Online Benutzer</div>
-            <div id="online-users-list" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 5px;">
-                <div style="color: #888; font-size: 11px;">Lade Online-Nutzer...</div>
+        <div id="chat-messages" class="chat-messages"></div>
+
+        <!-- Raster für reine Audio-/Namensteilnehmer -->
+        <div id="video-grid" style="display: none;"></div>
+
+        <div class="chat-input-area" id="chat-input-area-box" style="display: flex; flex-direction: column; gap: 5px; padding: 10px;">
+            <div class="chat-input-wrapper" style="display: flex; gap: 5px; width: 100%;">
+                <input type="text" id="msg-input" placeholder="Nachricht an #allgemein senden..." onkeydown="checkSend(event)" style="flex: 1;">
+
+                <!-- Allgemeiner Upload-Button für Bilder, Audio und Videos (bis 3 GB) -->
+                <label title="Datei senden (Bild, Audio, Video bis 3GB)" style="cursor: pointer; background: #2f3136; padding: 6px 10px; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #b9bbbe;">
+                    📁 <input type="file" id="general-file-input" accept="image/*,audio/*,video/*" style="display: none;" onchange="handleGeneralUpload(this)">
+                </label>
+
+                <button id="voice-record-btn" onclick="toggleVoiceRecording()" title="Sprachnachricht aufnehmen" style="cursor: pointer; background: #2f3136; border: 1px solid #444; border-radius: 4px; padding: 6px 10px; color: #b9bbbe;">
+                    🎤
+                </button>
+
+                <button class="send-btn" onclick="sendMessage()">Senden</button>
             </div>
+            <div id="recording-status" style="font-size: 11px; color: #ed4245; display: none;">🔴 Aufnahme läuft... (Klicke erneut auf das Mikrofon zum Beenden)</div>
+        </div>
+    </div>
+
+    <!-- NEU HINZUGEFÜGT: Rechte Nutzerliste für Online-Status -->
+    <div style="width: 200px; background: #2f3136; border-left: 1px solid #202225; display: flex; flex-direction: column;">
+        <div style="padding: 15px; font-weight: bold; color: #8e9297; font-size: 12px; border-bottom: 2px solid #202225;">ONLINE USERS</div>
+        <div id="online-users-list" style="flex: 1; padding: 10px; overflow-y: auto;">
+            <div style="color: #888; font-size: 11px;">Lade...</div>
         </div>
     </div>
 
@@ -236,144 +214,6 @@
     <script>
         socket.off('chat_message');
         socket.off('chat message');
-
-        // NEU: Prüfung auf Bann beim Start oder Verbinden
-        socket.on('banned_notification', (data) => {
-            alert(`Du wurdest vom Server gebannt!\nGrund: ${data.reason}`);
-            localStorage.removeItem('outer_heaven_user');
-            location.reload();
-        });
-
-        // NEU: Rollen-Update Listener
-        socket.on('role_updated', (data) => {
-            if (typeof currentUser !== 'undefined' && currentUser) {
-                currentUser.role = data.newRole;
-                localStorage.setItem('outer_heaven_user', JSON.stringify(currentUser));
-                document.getElementById('user-name-disp').innerText = `${currentUser.username} (${currentUser.role || 'Agent'})`;
-                checkAdminUIVisibility();
-            }
-        });
-
-        // NEU: Online-Liste Empfang
-        socket.on('update_online_users', (users) => {
-            const container = document.getElementById('online-users-list');
-            if (!container) return;
-            container.innerHTML = '';
-            if (!users || users.length === 0) {
-                container.innerHTML = '<div style="color: #888; font-size: 11px;">Keine Benutzer online.</div>';
-                return;
-            }
-            users.forEach(u => {
-                container.innerHTML = container.innerHTML + `
-                    <div onclick="openUserProfile('${u.username}')" style="display: flex; align-items: center; gap: 8px; padding: 5px; border-radius: 4px; cursor: pointer; background: rgba(255,255,255,0.03);" onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='rgba(255,255,255,0.03)'">
-                        <div style="width: 24px; height: 24px; border-radius: 50%; background: #5865f2; overflow: hidden; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: #fff;">
-                            ${u.avatar && u.avatar !== '/default-avatar.png' ? `<img src="${u.avatar}" style="width:100%;height:100%;object-fit:cover;">` : u.username.charAt(0).toUpperCase()}
-                        </div>
-                        <div style="display: flex; flex-direction: column;">
-                            <span style="font-size: 12px; color: #fff; font-weight: bold; line-height: 1.1;">${u.username}</span>
-                            <span style="font-size: 10px; color: #b9bbbe; line-height: 1.1;">${u.role}</span>
-                        </div>
-                    </div>
-                `;
-            });
-        });
-
-        function checkAdminUIVisibility() {
-            const adminBtn = document.getElementById('open-admin-dashboard-btn');
-            if (currentUser && (currentUser.role === 'Admin' || currentUser.role === 'Mod')) {
-                if (adminBtn) adminBtn.style.display = 'block';
-            } else {
-                if (adminBtn) adminBtn.style.display = 'none';
-            }
-        }
-
-        // Überschreibe / Ergänze initApp Status
-        const originalInitApp = window.initApp;
-        window.initApp = function() {
-            if (originalInitApp) originalInitApp();
-            checkAdminUIVisibility();
-        };
-
-        // Admin-Dashboard Funktionen öffnen / schließen
-        function openAdminDashboard() {
-            socket.emit('get_admin_data', (res) => {
-                if (!res || !res.success) {
-                    alert('Keine Berechtigung für das Admin-Dashboard.');
-                    return;
-                }
-
-                const userSelect = document.getElementById('admin-user-select');
-                const roleSelect = document.getElementById('admin-role-select');
-                userSelect.innerHTML = '';
-                roleSelect.innerHTML = '';
-
-                res.users.forEach(u => {
-                    userSelect.innerHTML += `<option value="${u.username}">${u.username} (${u.rank})</option>`;
-                });
-
-                Object.keys(res.roles).forEach(r => {
-                    roleSelect.innerHTML += `<option value="${r}">${r}</option>`;
-                });
-
-                document.getElementById('admin-dashboard-modal').style.display = 'flex';
-            });
-        }
-
-        function closeAdminDashboard() {
-            document.getElementById('admin-dashboard-modal').style.display = 'none';
-        }
-
-        function createNewRole() {
-            const roleName = document.getElementById('new-role-name-input').value.trim();
-            const checkboxes = document.querySelectorAll('.perm-checkbox:checked');
-            const permissions = Array.from(checkboxes).map(cb => cb.value);
-
-            if (!roleName) {
-                alert('Bitte einen Rollennamen eingeben.');
-                return;
-            }
-
-            socket.emit('admin_create_role', { roleName, permissions }, (res) => {
-                alert(res.message);
-                if (res.success) {
-                    document.getElementById('new-role-name-input').value = '';
-                    openAdminDashboard(); // Refresh
-                }
-            });
-        }
-
-        function assignUserRole() {
-            const targetUser = document.getElementById('admin-user-select').value;
-            const newRole = document.getElementById('admin-role-select').value;
-
-            socket.emit('admin_update_user_role', { targetUser, newRole }, (res) => {
-                alert(res.message);
-                if (res.success) {
-                    openAdminDashboard(); // Refresh
-                }
-            });
-        }
-
-        let banTargetUser = '';
-        function openBanReasonModalForUser() {
-            if (!activeProfileUser) return;
-            banTargetUser = activeProfileUser;
-            closeProfileModal();
-            document.getElementById('ban-reason-input').value = '';
-            document.getElementById('ban-reason-modal').style.display = 'flex';
-        }
-
-        function closeBanReasonModal() {
-            document.getElementById('ban-reason-modal').style.display = 'none';
-        }
-
-        function submitUserBan() {
-            const reason = document.getElementById('ban-reason-input').value.trim() || 'Kein Grund angegeben.';
-            socket.emit('admin_ban', { targetUser: banTargetUser, reason }, (res) => {
-                alert(res.message);
-                closeBanReasonModal();
-            });
-        }
 
         function handleIncomingMessageEvent(data) {
             window.allLoadedMessages = window.allLoadedMessages || [];
@@ -405,6 +245,11 @@
                     renderMessagesForCurrentChannel();
                 }
             }
+        });
+
+        socket.on('banned_notification', (data) => {
+            alert(`Du wurdest vom Server gebannt!\nGrund: ${data.reason}`);
+            logout();
         });
 
         window.sendMessage = function() {
@@ -482,6 +327,55 @@
             socket.emit('admin_kick', { targetUser: activeProfileUser, channel: currentChannel }, (res) => {
                 alert(res.message);
                 closeProfileModal();
+            });
+        }
+
+        function adminBanUserPrompt() {
+            if (!activeProfileUser) return;
+            const reason = prompt(`Gib den Banngrund für ${activeProfileUser} an:`, "Regelverstoß");
+            if (reason !== null) {
+                socket.emit('admin_ban', { targetUser: activeProfileUser, reason: reason }, (res) => {
+                    alert(res.message);
+                    closeProfileModal();
+                });
+            }
+        }
+
+        // --- NEU HINZUGEFÜGT: Admin-Menü Frontend Funktionen ---
+        function openAdminMenu() {
+            document.getElementById('admin-menu-modal').style.display = 'flex';
+            socket.emit('get_roles_data', (res) => {
+                if (res.success) {
+                    const select = document.getElementById('admin-role-select');
+                    select.innerHTML = '';
+                    Object.keys(res.roles).forEach(role => {
+                        select.innerHTML += `<option value="${role}">${role}</option>`;
+                    });
+                }
+            });
+        }
+
+        function closeAdminMenu() {
+            document.getElementById('admin-menu-modal').style.display = 'none';
+        }
+
+        function createNewRole() {
+            const roleName = document.getElementById('new-role-name').value.trim();
+            if (!roleName) return alert('Bitte Rollennamen eingeben.');
+            socket.emit('create_role', { roleName, permissions: ['all'] }, () => {
+                alert('Rolle erfolgreich erstellt!');
+                document.getElementById('new-role-name').value = '';
+                openAdminMenu();
+            });
+        }
+
+        function assignUserRole() {
+            const targetUser = document.getElementById('admin-target-user').value.trim();
+            const newRole = document.getElementById('admin-role-select').value;
+            if (!targetUser) return alert('Bitte Zielbenutzer eingeben.');
+            socket.emit('assign_role', { targetUser, newRole }, () => {
+                alert(`Rolle ${newRole} an ${targetUser} zugewiesen!`);
+                document.getElementById('admin-target-user').value = '';
             });
         }
 
