@@ -394,7 +394,7 @@ io.on('connection', (socket) => {
 
         privateMessages.push(pmObj);
         if (privateMessages.length > 500) privateMessages.shift();
-        savePrivateMessages();
+        savePrivateMessages(); // <-- Hier wird es nun dauerhaft in privatemessage.json gespeichert
 
         for (let [id, s] of io.sockets.sockets) {
             if (s.username === recipient || s.username === sender) {
@@ -732,6 +732,7 @@ app.get('/api/view-db', (req, res) => {
         res.status(404).json({ success: false, message: 'Keine database.json gefunden.' });
     }
 });
+
 app.get('/api/view-messages', (req, res) => {
     if (fs.existsSync(messagesFile)) {
         const data = fs.readFileSync(messagesFile, 'utf8');
@@ -742,6 +743,7 @@ app.get('/api/view-messages', (req, res) => {
     }
 });
 
+// API-Endpunkt für die Ansicht der gespeicherten Privatnachrichten im Browser
 app.get('/api/view-private-messages', (req, res) => {
     if (fs.existsSync(privateMessagesFile)) {
         const data = fs.readFileSync(privateMessagesFile, 'utf8');
