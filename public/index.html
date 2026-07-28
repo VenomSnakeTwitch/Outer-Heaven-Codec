@@ -143,8 +143,8 @@
             <div class="chat-input-wrapper" style="display: flex; gap: 5px; width: 100%;">
                 <input type="text" id="msg-input" placeholder="Nachricht an #allgemein senden..." onkeydown="checkSend(event)" style="flex: 1;">
 
-                <!-- Allgemeiner Upload-Button für Bilder, Audio und Videos -->
-                <label title="Datei senden (Bild, Audio, Video)" style="cursor: pointer; background: #2f3136; padding: 6px 10px; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #b9bbbe;">
+                <!-- Allgemeiner Upload-Button für Bilder, Audio und Videos (bis 3 GB) -->
+                <label title="Datei senden (Bild, Audio, Video bis 3GB)" style="cursor: pointer; background: #2f3136; padding: 6px 10px; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #b9bbbe;">
                     📁 <input type="file" id="general-file-input" accept="image/*,audio/*,video/*" style="display: none;" onchange="handleGeneralUpload(this)">
                 </label>
 
@@ -165,7 +165,6 @@
         socket.off('chat_message');
         socket.off('chat message');
 
-        // Einheitlicher Event-Listener mit Kanal-Filterprüfung
         function handleIncomingMessageEvent(data) {
             window.allLoadedMessages = window.allLoadedMessages || [];
             if (!window.allLoadedMessages.some(m => m.timestamp === data.timestamp && m.user === (data.user || data.username) && m.text === (data.text || data.message))) {
@@ -319,7 +318,7 @@
                 document.getElementById('video-grid').style.display = 'none';
                 document.getElementById('chat-input-area-box').style.display = 'flex';
                 document.getElementById('leave-voice-btn').style.display = 'none';
-                
+
                 const msgInput = document.getElementById('msg-input');
                 if(msgInput) msgInput.placeholder = `Nachricht an #${name} senden...`;
 
@@ -418,12 +417,20 @@
 
         setInterval(loadFriendsAndRequests, 3000);
 
-        // Universelle Upload-Funktion für den allgemeinen Button
+        // Universelle Upload-Funktion mit integrierter Größenprüfung (Max. 3 GB)
         function handleGeneralUpload(input) {
             if (input.files && input.files[0]) {
                 const file = input.files[0];
+                const maxSize = 3 * 1024 * 1024 * 1024; // 3 GB in Bytes
+
+                if (file.size > maxSize) {
+                    alert('Die Datei ist zu groß! Die maximale Dateigröße beträgt 3 GB.');
+                    input.value = '';
+                    return;
+                }
+
                 const reader = new FileReader();
-                
+
                 let mediaType = 'image';
                 if (file.type.startsWith('audio/')) {
                     mediaType = 'audiofile';
