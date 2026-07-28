@@ -187,7 +187,7 @@
         </div>
     </div>
 
-    <!-- Dynamisches Privatchat-Fenster (Anfangs versteckt) -->
+    <!-- Dynamisches Privatchat-Fenster -->
     <div id="private-chat-container" style="display: none;">
         <div class="private-chat-header">
             <span id="private-chat-title">Direktnachricht</span>
@@ -325,7 +325,7 @@
 
         // --- Privatchat Funktionen ---
         let activePrivateChatUser = null;
-        let privateMessagesStore = {}; // Speichert Nachrichten pro Nutzer
+        let privateMessagesStore = {};
 
         window.openPrivateChat = function(username) {
             const currentUserName = (typeof currentUser !== 'undefined' && currentUser.username) ? currentUser.username : (document.getElementById('user-name-disp')?.innerText);
