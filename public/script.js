@@ -497,7 +497,7 @@ socket.on('update_voice_channel_users', (data) => {
 socket.on('peer joined', (data) => {});
 socket.on('peer left', (socketId) => {});
 
-// --- NEU HINZUGEFÜGT: Online-Nutzerliste Aktualisierung ---
+// --- Online-Nutzerliste Aktualisierung ---
 socket.on('update_online_users', (users) => {
     const listContainer = document.getElementById('online-users-list');
     if (!listContainer) return;
