@@ -29,7 +29,7 @@ let db = {
     requests: {},
     messages: [],
     channels: {
-        text: ['allgemein'],
+        text: ['allgemein', 'gta-online'],
         voice: ['Lobby']
     }
 };
@@ -41,8 +41,18 @@ if (fs.existsSync(dbFile)) {
         if (!db.profiles) db.profiles = {};
         if (!db.friends) db.friends = {};
         if (!db.requests) db.requests = {};
-        if (!db.messages) db.messages = [];
-        if (!db.channels) db.channels = { text: ['allgemein'], voice: ['Lobby'] };
+        if (!db.messages) db.messages = {}; // Als Objekt oder Array (wir behalten Arrays pro Kanal bei Bedarf oder filtern)
+        if (!db.channels) db.channels = { text: ['allgemein', 'gta-online'], voice: ['Lobby'] };
+        
+        // Falls messages bisher ein Array waren, mappen wir sie sauber auf Kanäle falls nötig
+        if (Array.isArray(db.messages)) {
+            const oldMessages = db.messages;
+            db.messages = [];
+            oldMessages.forEach(m => {
+                const ch = m.channel || 'allgemein';
+                db.messages.push({ ...m, channel: ch });
+            });
+        }
     } catch (err) {
         console.error('Fehler beim Laden der database.json:', err);
     }
@@ -138,7 +148,6 @@ app.post('/api/upload-avatar', (req, res) => {
     }
 });
 
-// Hilfsfunktion zur Ermittlung aller Nutzer in einem Sprachkanal
 function getVoiceChannelUsers(channelName) {
     const room = io.sockets.adapter.rooms.get(channelName);
     if (!room) return [];
@@ -157,7 +166,11 @@ function getVoiceChannelUsers(channelName) {
 }
 
 io.on('connection', (socket) => {
-    // Sende den gespeicherten Chatverlauf an den neu verbundenen Client
+    // Sende den gesamten Verlauf und Kanäle an den Client
+    socket.emit('init state', {
+        channels: db.channels,
+        messages: db.messages
+    });
     socket.emit('load_history', db.messages);
 
     socket.on('set_user_info', (data) => {
@@ -170,7 +183,6 @@ io.on('connection', (socket) => {
         saveDatabase();
     });
 
-    // Kanäle Handling
     socket.on('get_channels', (callback) => {
         if (typeof callback === 'function') callback(db.channels);
     });
@@ -191,6 +203,8 @@ io.on('connection', (socket) => {
         db.channels[type].push(name);
         saveDatabase();
 
+        // Informiere alle Clients über neue Kanäle
+        io.emit('init state', { channels: db.channels, messages: db.messages });
         if (typeof callback === 'function') callback({ success: true });
     });
 
@@ -242,7 +256,6 @@ io.on('connection', (socket) => {
         });
     });
 
-    // --- Direkt-Anrufe für Freunde ---
     socket.on('start_direct_call', (data) => {
         const { targetUsername, room } = data;
         socket.join(room);
@@ -294,7 +307,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Audio-Geräteeinstellungen persistent in database.json speichern
     socket.on('set_audio_settings', (data, callback) => {
         const { username, audioInputId, audioOutputId } = data;
         if (!username || !db.profiles[username]) {
@@ -309,14 +321,14 @@ io.on('connection', (socket) => {
         if (typeof callback === 'function') callback({ success: true });
     });
 
-    // --- Einheitliche Nachrichten-Verarbeitung (unterstützt 'chat message' und 'chat_message') ---
+    // --- Einheitliche Nachrichten-Verarbeitung ---
     socket.on('chat message', handleIncomingMessage);
     socket.on('chat_message', handleIncomingMessage);
 
     function handleIncomingMessage(data) {
         const username = socket.username || data.user || data.username || 'Unbekannt';
         let text = data.text || data.message || '';
-        const channel = data.channel || 'allgemein';
+        const channel = data.channel || 'allgemein'; // Nimmt exakt den übergebenen Kanal!
 
         const urlRegex = /(https?:\/\/[^\s]+)/g;
         text = text.replace(urlRegex, (url) => {
@@ -345,15 +357,16 @@ io.on('connection', (socket) => {
         };
 
         db.messages.push(chatMsg);
-        if (db.messages.length > 200) db.messages.shift();
-        saveDatabase(); // Speichert die Änderung dauerhaft in database.json
+        if (db.messages.length > 300) db.messages.shift();
+        saveDatabase();
 
         io.emit('chat message', chatMsg);
     }
 
     socket.on('chat_media', (data) => {
-        const { username, type, fileData, fileName: originalFileName } = data;
+        const { username, type, fileData, fileName: originalFileName, channel: targetChannel } = data;
         if (!fileData) return;
+        const channel = targetChannel || 'allgemein';
 
         try {
             let matches, fileExtension;
@@ -400,7 +413,7 @@ io.on('connection', (socket) => {
             }
 
             const chatMsg = {
-                channel: 'allgemein',
+                channel: channel,
                 user: username,
                 text: messageHTML,
                 avatar: db.profiles[username]?.avatar || '/default-avatar.png',
@@ -408,7 +421,7 @@ io.on('connection', (socket) => {
             };
 
             db.messages.push(chatMsg);
-            if (db.messages.length > 200) db.messages.shift();
+            if (db.messages.length > 300) db.messages.shift();
             saveDatabase();
 
             io.emit('chat message', chatMsg);
@@ -508,7 +521,6 @@ io.on('connection', (socket) => {
     });
 });
 
-// --- Diagnose-Endpunkt zum Einsehen der Datenbank im Browser ---
 app.get('/api/view-db', (req, res) => {
     if (fs.existsSync(dbFile)) {
         const data = fs.readFileSync(dbFile, 'utf8');
