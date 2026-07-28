@@ -186,61 +186,62 @@ function switchChannel(type, name) {
         document.getElementById('chat-input-area-box').style.display = 'flex';
         document.getElementById('video-grid').style.display = 'none';
         document.getElementById('leave-voice-btn').style.display = 'none';
+        
+        // Placeholder im Eingabefeld anpassen
+        document.getElementById('msg-input').placeholder = `Nachricht an #${name} senden...`;
+
+        // Verlauf für diesen spezifischen Kanal neu rendern
+        renderMessagesForCurrentChannel();
     }
 }
 
-function checkSend(e) {
-    if (e.key === 'Enter') sendMessage();
-}
-
-function sendMessage() {
-    const input = document.getElementById('msg-input');
-    const text = input.value.trim();
-    if(!text) return;
-    
-    socket.emit('chat message', { 
-        channel: currentChannel, 
-        user: currentUser ? currentUser.username : 'Anonym',
-        text: text 
-    });
-    input.value = '';
-}
-
-// Chatverlauf laden (unterstützt universell alle Schlüssel-Varianten)
-socket.on('load_history', (messages) => {
+// Hilfsfunktion, die nur die Nachrichten des aktuellen Kanals anzeigt
+function renderMessagesForCurrentChannel() {
     const container = document.getElementById('chat-messages');
     container.innerHTML = '';
     
-    messages.forEach(msg => {
+    // Wir filtern aus dem globalen Array oder lassen den Server senden
+    // Da der Server alle schickt, filtern wir hier strikt nach Kanal:
+    window.allLoadedMessages = window.allLoadedMessages || [];
+    
+    window.allLoadedMessages.forEach(msg => {
         const targetChannel = msg.channel || 'allgemein';
-        // Zeigt die Nachrichten des aktuellen Kanals an (oder fallback auf 'allgemein', falls kein Kanal gesetzt war)
-        if (targetChannel === currentChannel || (!msg.channel && currentChannel === 'allgemein')) {
-            const userName = msg.user || msg.username || 'Unbekannt';
-            const msgText = msg.text || msg.message || '';
-            container.innerHTML += `
-                <div class="message">
-                    <span class="msg-user">${userName}</span>
-                    <span class="msg-text">${msgText}</span>
-                </div>
-            `;
+        if (targetChannel === currentChannel) {
+            appendMessageToDOM(msg);
         }
     });
     container.scrollTop = container.scrollHeight;
+}
+
+function appendMessageToDOM(msg) {
+    const container = document.getElementById('chat-messages');
+    const userName = msg.user || msg.username || 'Unbekannt';
+    const msgText = msg.text || msg.message || '';
+    
+    container.innerHTML += `
+        <div class="message">
+            <span class="msg-user">${userName}</span>
+            <span class="msg-text">${msgText}</span>
+        </div>
+    `;
+}
+
+// Chatverlauf vom Server empfangen und zwischenspeichern
+socket.on('load_history', (messages) => {
+    window.allLoadedMessages = messages;
+    renderMessagesForCurrentChannel();
 });
 
 // Neue Nachrichten in Echtzeit empfangen
 socket.on('chat message', (msg) => {
+    window.allLoadedMessages = window.allLoadedMessages || [];
+    window.allLoadedMessages.push(msg);
+
     const targetChannel = msg.channel || 'allgemein';
-    if(targetChannel === currentChannel) {
+    // Nur anzeigen, wenn man sich gerade in diesem Kanal befindet
+    if (targetChannel === currentChannel) {
+        appendMessageToDOM(msg);
         const container = document.getElementById('chat-messages');
-        const userName = msg.user || msg.username || 'Unbekannt';
-        const msgText = msg.text || msg.message || '';
-        container.innerHTML += `
-            <div class="message">
-                <span class="msg-user">${userName}</span>
-                <span class="msg-text">${msgText}</span>
-            </div>
-        `;
         container.scrollTop = container.scrollHeight;
     }
 });
