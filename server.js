@@ -7,12 +7,10 @@ const fs = require('fs');
 const app = express();
 const server = httpModule.createServer(app);
 
-// Socket.io Puffer auf 3 GB erhöht
 const io = new Server(server, {
     maxHttpBufferSize: 3e9
 });
 
-// Express Body-Parser Limits auf 3 GB konfiguriert
 app.use(express.json({ limit: '3gb' }));
 app.use(express.urlencoded({ limit: '3gb', extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -22,7 +20,6 @@ if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// --- Datenbank-Dateisystem (database.json) ---
 const dbFile = path.join(__dirname, 'database.json');
 
 let db = {
@@ -35,7 +32,7 @@ let db = {
     },
     roles: {
         'Admin': { permissions: ['all'] },
-        'Mod': { permissions: ['kick', 'delete_messages', 'mark_messages'] },
+        'Mod': { permissions: ['kick', 'ban', 'delete_messages', 'mark_messages'] },
         'Agent': { permissions: [] }
     }
 };
@@ -48,7 +45,13 @@ if (fs.existsSync(dbFile)) {
         if (!db.friends) db.friends = {};
         if (!db.requests) db.requests = {};
         if (!db.channels) db.channels = { text: ['allgemein', 'gta-online'], voice: ['Lobby'] };
-        if (!db.roles) db.roles = { 'Admin': { permissions: ['all'] }, 'Mod': { permissions: ['kick'] }, 'Agent': { permissions: [] } };
+        if (!db.roles) {
+            db.roles = {
+                'Admin': { permissions: ['all'] },
+                'Mod': { permissions: ['kick', 'ban', 'delete_messages', 'mark_messages'] },
+                'Agent': { permissions: [] }
+            };
+        }
     } catch (err) {
         console.error('Fehler beim Laden der database.json:', err);
     }
@@ -62,7 +65,6 @@ function saveDatabase() {
     }
 }
 
-// --- Separate Nachrichten-Datenbank (messages.json) ---
 const messagesFile = path.join(__dirname, 'messages.json');
 let chatMessages = [];
 
@@ -84,10 +86,19 @@ function saveMessages() {
     }
 }
 
-// Geheimer Admin-Schlüssel für die Registrierung (kann hier angepasst werden)
 const ADMIN_SECRET_KEY = "admin123";
 
-// --- HTTP-Registrierungs-Endpunkt mit Admin-Unterstützung ---
+// Hilfsfunktion zur Berechtigungsprüfung
+function hasPermission(username, permissionName) {
+    const userProfile = db.profiles[username];
+    if (!userProfile) return false;
+    const roleName = userProfile.rank || 'Agent';
+    const roleData = db.roles[roleName];
+    if (!roleData) return false;
+    if (roleData.permissions.includes('all')) return true;
+    return roleData.permissions.includes(permissionName);
+}
+
 app.post('/api/register', (req, res) => {
     const { username, password, adminSecret } = req.body;
 
@@ -99,7 +110,6 @@ app.post('/api/register', (req, res) => {
         return res.status(400).json({ success: false, message: 'Benutzer existiert bereits.' });
     }
 
-    // Rang-Zuweisung je nach Admin-Schlüssel
     let assignedRank = 'Agent';
     if (adminSecret && adminSecret === ADMIN_SECRET_KEY) {
         assignedRank = 'Admin';
@@ -119,7 +129,6 @@ app.post('/api/register', (req, res) => {
     res.json({ success: true, message: `Registrierung als '${assignedRank}' erfolgreich!` });
 });
 
-// --- HTTP-Login-Endpunkt ---
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
 
@@ -143,7 +152,6 @@ app.post('/api/login', (req, res) => {
     });
 });
 
-// Avatar-Upload Endpunkt
 app.post('/api/upload-avatar', (req, res) => {
     const { username, imageBase64 } = req.body;
     if (!username || !imageBase64) {
@@ -234,6 +242,11 @@ io.on('connection', (socket) => {
             return;
         }
 
+        if (!hasPermission(socket.username, 'create_channel') && db.profiles[socket.username]?.rank !== 'Admin') {
+            if (typeof callback === 'function') callback({ success: false, message: 'Keine Berechtigung zum Erstellen von Kanälen.' });
+            return;
+        }
+
         if (!db.channels[type]) db.channels[type] = [];
         if (db.channels[type].includes(name)) {
             if (typeof callback === 'function') callback({ success: false, message: 'Kanal existiert bereits.' });
@@ -247,10 +260,8 @@ io.on('connection', (socket) => {
         if (typeof callback === 'function') callback({ success: true });
     });
 
-    // --- NEU HINZUGEFÜGT: Admin-Funktionen für Rollen & Banngrund ---
     socket.on('get_roles_data', (callback) => {
-        const senderProfile = db.profiles[socket.username];
-        if (!senderProfile || senderProfile.rank !== 'Admin') {
+        if (!hasPermission(socket.username, 'manage_roles') && db.profiles[socket.username]?.rank !== 'Admin') {
             if (typeof callback === 'function') callback({ success: false });
             return;
         }
@@ -258,8 +269,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('create_role', (data, callback) => {
-        const senderProfile = db.profiles[socket.username];
-        if (!senderProfile || senderProfile.rank !== 'Admin') return;
+        if (!hasPermission(socket.username, 'manage_roles') && db.profiles[socket.username]?.rank !== 'Admin') return;
         const { roleName, permissions } = data;
         if (!roleName) return;
 
@@ -269,8 +279,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('assign_role', (data, callback) => {
-        const senderProfile = db.profiles[socket.username];
-        if (!senderProfile || senderProfile.rank !== 'Admin') return;
+        if (!hasPermission(socket.username, 'manage_roles') && db.profiles[socket.username]?.rank !== 'Admin') return;
         const { targetUser, newRole } = data;
         if (!db.profiles[targetUser] || !db.roles[newRole]) return;
 
@@ -287,12 +296,10 @@ io.on('connection', (socket) => {
         if (typeof callback === 'function') callback({ success: true });
     });
 
-    // --- Admin-Berechtigungen (Kick & Ban mit Grund) ---
     socket.on('admin_kick', (data, callback) => {
         const { targetUser } = data;
-        const senderProfile = db.profiles[socket.username];
-        if (!senderProfile || (senderProfile.rank !== 'Admin' && senderProfile.rank !== 'Mod')) {
-            if (typeof callback === 'function') callback({ success: false, message: 'Keine Berechtigung.' });
+        if (!hasPermission(socket.username, 'kick')) {
+            if (typeof callback === 'function') callback({ success: false, message: 'Keine Berechtigung zum Kicken.' });
             return;
         }
 
@@ -308,9 +315,8 @@ io.on('connection', (socket) => {
 
     socket.on('admin_ban', (data, callback) => {
         const { targetUser, reason } = data;
-        const senderProfile = db.profiles[socket.username];
-        if (!senderProfile || senderProfile.rank !== 'Admin') {
-            if (typeof callback === 'function') callback({ success: false, message: 'Nur Admins können bannen.' });
+        if (!hasPermission(socket.username, 'ban')) {
+            if (typeof callback === 'function') callback({ success: false, message: 'Keine Berechtigung zum Bannen.' });
             return;
         }
 
@@ -328,11 +334,9 @@ io.on('connection', (socket) => {
         if (typeof callback === 'function') callback({ success: true, message: `${targetUser} wurde gebannt. Grund: ${reason || 'Keiner'}` });
     });
 
-    // --- Nachrichten verwalten (Löschen & Markieren) ---
     socket.on('delete_message', (data) => {
         const { messageId } = data;
-        const senderProfile = db.profiles[socket.username];
-        if (!senderProfile || (senderProfile.rank !== 'Admin' && senderProfile.rank !== 'Mod')) return;
+        if (!hasPermission(socket.username, 'delete_messages')) return;
 
         chatMessages = chatMessages.filter(m => m.id !== messageId);
         saveMessages();
@@ -341,8 +345,7 @@ io.on('connection', (socket) => {
 
     socket.on('toggle_mark_message', (data) => {
         const { messageId } = data;
-        const senderProfile = db.profiles[socket.username];
-        if (!senderProfile || (senderProfile.rank !== 'Admin' && senderProfile.rank !== 'Mod')) return;
+        if (!hasPermission(socket.username, 'mark_messages')) return;
 
         const msg = chatMessages.find(m => m.id === messageId);
         if (msg) {
@@ -352,7 +355,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // --- Sprachkanal & Audio-Streaming Events ---
     socket.on('join_voice_channel', (data) => {
         const channelName = data?.channelName;
         if (!channelName) return;
@@ -466,7 +468,6 @@ io.on('connection', (socket) => {
         if (typeof callback === 'function') callback({ success: true });
     });
 
-    // --- Einheitliche Nachrichten-Verarbeitung ---
     socket.on('chat message', handleIncomingMessage);
     socket.on('chat_message', handleIncomingMessage);
 
