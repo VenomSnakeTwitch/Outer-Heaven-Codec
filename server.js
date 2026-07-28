@@ -6,10 +6,13 @@ const fs = require('fs');
 
 const app = express();
 const server = httpModule.createServer(app);
+
+// Socket.io Puffer auf 3 GB erhöht
 const io = new Server(server, {
     maxHttpBufferSize: 3e9
 });
 
+// Express Body-Parser Limits auf 3 GB konfiguriert
 app.use(express.json({ limit: '3gb' }));
 app.use(express.urlencoded({ limit: '3gb', extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
