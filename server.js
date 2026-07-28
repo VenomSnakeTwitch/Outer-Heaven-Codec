@@ -354,7 +354,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Privatnachrichten-Events
     socket.on('private_message', (data) => {
         const { recipient, text } = data;
         const sender = socket.username;
@@ -368,7 +367,6 @@ io.on('connection', (socket) => {
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         };
 
-        // An den Empfänger und den Sender selbst senden
         for (let [id, s] of io.sockets.sockets) {
             if (s.username === recipient || s.username === sender) {
                 s.emit('private_message', pmObj);
