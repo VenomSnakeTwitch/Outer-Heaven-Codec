@@ -78,30 +78,10 @@ function saveMessages() {
     }
 }
 
-// Geheimer Admin-Schlüssel für die Registrierung
+// Geheimer Admin-Schlüssel für die Registrierung (kann hier angepasst werden)
 const ADMIN_SECRET_KEY = "admin123";
 
-// Hilfsfunktion zur Ermittlung aller aktuell online eingeloggten User
-function getOnlineUsersList() {
-    const onlineUsers = [];
-    for (let [id, socket] of io.sockets.sockets) {
-        if (socket.username) {
-            const profile = db.profiles[socket.username] || {};
-            onlineUsers.push({
-                username: socket.username,
-                role: profile.rank || 'Agent',
-                avatar: profile.avatar || '/default-avatar.png'
-            });
-        }
-    }
-    return onlineUsers;
-}
-
-function broadcastOnlineUsers() {
-    io.emit('update_online_users', getOnlineUsersList());
-}
-
-// --- HTTP-Registrierungs-Endpunkt ---
+// --- HTTP-Registrierungs-Endpunkt mit Admin-Unterstützung ---
 app.post('/api/register', (req, res) => {
     const { username, password, adminSecret } = req.body;
 
@@ -113,6 +93,7 @@ app.post('/api/register', (req, res) => {
         return res.status(400).json({ success: false, message: 'Benutzer existiert bereits.' });
     }
 
+    // Rang-Zuweisung je nach Admin-Schlüssel
     let assignedRank = 'Agent';
     if (adminSecret && adminSecret === ADMIN_SECRET_KEY) {
         assignedRank = 'Admin';
@@ -220,11 +201,6 @@ io.on('connection', (socket) => {
             ...data
         };
         saveDatabase();
-        broadcastOnlineUsers();
-    });
-
-    socket.on('get_online_users', (callback) => {
-        if (typeof callback === 'function') callback(getOnlineUsersList());
     });
 
     socket.on('get_channels', (callback) => {
@@ -251,34 +227,7 @@ io.on('connection', (socket) => {
         if (typeof callback === 'function') callback({ success: true });
     });
 
-    // --- Admin-Berechtigungen & Benutzerverwaltung ---
-    socket.on('admin_update_user_role', (data, callback) => {
-        const { targetUser, newRole } = data;
-        const senderProfile = db.profiles[socket.username];
-        if (!senderProfile || senderProfile.rank !== 'Admin') {
-            if (typeof callback === 'function') callback({ success: false, message: 'Nur Admins können Ränge anpassen.' });
-            return;
-        }
-
-        if (!db.profiles[targetUser]) {
-            if (typeof callback === 'function') callback({ success: false, message: 'Benutzer nicht gefunden.' });
-            return;
-        }
-
-        db.profiles[targetUser].rank = newRole;
-        saveDatabase();
-        broadcastOnlineUsers();
-
-        for (let [id, s] of io.sockets.sockets) {
-            if (s.username === targetUser) {
-                s.emit('role_updated', { newRole });
-                break;
-            }
-        }
-
-        if (typeof callback === 'function') callback({ success: true, message: `Rang für ${targetUser} auf ${newRole} geändert.` });
-    });
-
+    // --- Admin-Berechtigungen (Kick & Ban) ---
     socket.on('admin_kick', (data, callback) => {
         const { targetUser } = data;
         const senderProfile = db.profiles[socket.username];
@@ -289,12 +238,12 @@ io.on('connection', (socket) => {
 
         for (let [id, s] of io.sockets.sockets) {
             if (s.username === targetUser) {
-                s.emit('direct_call_ended');
+                s.emit('direct_call_ended'); // Erzwingt Verlassen von Räumen
                 s.disconnect(true);
                 break;
             }
         }
-        if (typeof callback === 'function') callback({ success: true, message: `${targetUser} wurde gekickt.` });
+        if (typeof callback === 'function') callback({ success: true, message: `${targetUser} wurde aus dem Kanal gekickt.` });
     });
 
     socket.on('admin_ban', (data, callback) => {
@@ -314,10 +263,10 @@ io.on('connection', (socket) => {
                 break;
             }
         }
-        broadcastOnlineUsers();
-        if (typeof callback === 'function') callback({ success: true, message: `${targetUser} wurde gebannt.` });
+        if (typeof callback === 'function') callback({ success: true, message: `${targetUser} wurde dauerhaft gebannt.` });
     });
 
+    // --- Nachrichten verwalten (Löschen & Markieren) ---
     socket.on('delete_message', (data) => {
         const { messageId } = data;
         const senderProfile = db.profiles[socket.username];
@@ -341,6 +290,92 @@ io.on('connection', (socket) => {
         }
     });
 
+    // --- Sprachkanal & Audio-Streaming Events ---
+    socket.on('join_voice_channel', (data) => {
+        const channelName = data?.channelName;
+        if (!channelName) return;
+
+        if (socket.rooms) {
+            socket.rooms.forEach(room => {
+                if (room !== socket.id && room !== channelName) {
+                    socket.leave(room);
+                    io.to(room).emit('update_voice_channel_users', {
+                        channelName: room,
+                        users: getVoiceChannelUsers(room)
+                    });
+                }
+            });
+        }
+
+        socket.join(channelName);
+
+        io.to(channelName).emit('update_voice_channel_users', {
+            channelName: channelName,
+            users: getVoiceChannelUsers(channelName)
+        });
+    });
+
+    socket.on('leave_voice_channel', () => {
+        if (socket.rooms) {
+            socket.rooms.forEach(room => {
+                if (room !== socket.id) {
+                    socket.leave(room);
+                    io.to(room).emit('update_voice_channel_users', {
+                        channelName: room,
+                        users: getVoiceChannelUsers(room)
+                    });
+                }
+            });
+        }
+    });
+
+    socket.on('voice data', (data) => {
+        const channel = data?.channel;
+        if (!channel) return;
+        socket.to(channel).emit('voice data', {
+            senderId: socket.id,
+            audioBuffer: data.audioBuffer
+        });
+    });
+
+    socket.on('start_direct_call', (data) => {
+        const { targetUsername, room } = data;
+        socket.join(room);
+
+        for (let [id, s] of io.sockets.sockets) {
+            if (s.username === targetUsername) {
+                s.join(room);
+                s.emit('incoming_direct_call', { callerName: socket.username });
+                break;
+            }
+        }
+    });
+
+    socket.on('direct_voice_data', (data) => {
+        const { targetUser, audioBuffer } = data;
+        for (let [id, s] of io.sockets.sockets) {
+            if (s.username === targetUser) {
+                s.emit('direct_voice_data', { audioBuffer });
+                break;
+            }
+        }
+    });
+
+    socket.on('end_direct_call', (data) => {
+        const { targetUser } = data;
+        if (!socket.username || !targetUser) return;
+        const room = [socket.username, targetUser].sort().join('_call_');
+        socket.leave(room);
+
+        for (let [id, s] of io.sockets.sockets) {
+            if (s.username === targetUser) {
+                s.leave(room);
+                s.emit('direct_call_ended', { by: socket.username });
+                break;
+            }
+        }
+    });
+
     socket.on('disconnect', () => {
         if (socket.rooms) {
             socket.rooms.forEach(room => {
@@ -352,7 +387,6 @@ io.on('connection', (socket) => {
                 }
             });
         }
-        broadcastOnlineUsers();
     });
 
     socket.on('set_audio_settings', (data, callback) => {
@@ -369,6 +403,7 @@ io.on('connection', (socket) => {
         if (typeof callback === 'function') callback({ success: true });
     });
 
+    // --- Einheitliche Nachrichten-Verarbeitung ---
     socket.on('chat message', handleIncomingMessage);
     socket.on('chat_message', handleIncomingMessage);
 
@@ -376,6 +411,24 @@ io.on('connection', (socket) => {
         const username = socket.username || data.user || data.username || 'Unbekannt';
         let text = data.text || data.message || '';
         const channel = data.channel || 'allgemein';
+
+        const urlRegex = /(https?:\/\/[^\s]+)/g;
+        text = text.replace(urlRegex, (url) => {
+            let hostname = '';
+            try {
+                hostname = new URL(url).hostname;
+            } catch (e) {
+                hostname = url;
+            }
+            return `
+                <div style="margin-top: 6px; margin-bottom: 6px;">
+                    <a href="${url}" target="_blank" style="color: #00b0f4; text-decoration: none; word-break: break-all;">${url}</a>
+                    <div style="background: #2f3136; border-left: 4px solid #7289da; padding: 10px; border-radius: 4px; margin-top: 4px; max-width: 400px;">
+                        <div style="font-size: 12px; font-weight: bold; color: #ffffff;">Webseiten-Vorschau</div>
+                        <div style="font-size: 11px; color: #b9bbbe; margin-top: 2px;">Inhalt für: ${hostname}</div>
+                    </div>
+                </div>`;
+        });
 
         const chatMsg = {
             id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
@@ -394,6 +447,186 @@ io.on('connection', (socket) => {
 
         io.emit('chat message', chatMsg);
         io.emit('chat_message', chatMsg);
+    }
+
+    socket.on('chat_media', (data) => {
+        const { username, type, fileData, fileName: originalFileName, channel: targetChannel } = data;
+        if (!fileData) return;
+        const channel = targetChannel || 'allgemein';
+
+        try {
+            let matches, fileExtension;
+
+            if (type === 'image') {
+                matches = fileData.match(/^data:image\/([A-Za-z-+\/]+);base64,(.+)$/);
+                fileExtension = matches ? (matches[1] === 'jpeg' ? 'jpg' : matches[1]) : 'png';
+            } else if (type === 'audio' || type === 'audiofile') {
+                matches = fileData.match(/^data:audio\/([A-Za-z-+\/]+);base64,(.+)$/);
+                fileExtension = matches ? matches[1].replace('x-', '').replace('webm', 'webm') : 'webm';
+            } else if (type === 'video') {
+                matches = fileData.match(/^data:video\/([A-Za-z-+\/]+);base64,(.+)$/);
+                fileExtension = matches ? matches[1] : 'mp4';
+            } else {
+                return;
+            }
+
+            if (!matches || matches.length != 3) return;
+
+            const base64Data = matches[2];
+            const fileName = `${type}_${username}_${Date.now()}.${fileExtension}`;
+            const filePath = path.join(uploadsDir, fileName);
+
+            fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
+            const fileUrl = `/uploads/${fileName}`;
+
+            let messageHTML = '';
+            if (type === 'image') {
+                messageHTML = `<img src="${fileUrl}" style="max-width: 350px; max-height: 350px; border-radius: 8px; margin-top: 6px; display: block; box-shadow: 0 2px 10px rgba(0,0,0,0.3);">`;
+            } else if (type === 'audio' || type === 'audiofile') {
+                const displayName = originalFileName || 'Sprachnachricht / Audio';
+                messageHTML = `
+                    <div style="background: #2f3136; padding: 10px; border-radius: 8px; margin-top: 6px; max-width: 320px; border: 1px solid #202225;">
+                        <div style="font-size: 12px; color: #dcddde; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                            <span>🎵</span> <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${displayName}</span>
+                        </div>
+                        <audio controls preload="metadata" src="${fileUrl}" style="width: 100%; height: 32px;"></audio>
+                    </div>`;
+            } else if (type === 'video') {
+                messageHTML = `
+                    <div style="margin-top: 6px;">
+                        <video controls src="${fileUrl}" style="max-width: 350px; max-height: 350px; border-radius: 8px; display: block;"></video>
+                    </div>`;
+            }
+
+            const chatMsg = {
+                id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+                channel: channel,
+                user: username,
+                message: messageHTML,
+                text: messageHTML,
+                marked: false,
+                avatar: db.profiles[username]?.avatar || '/default-avatar.png',
+                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            };
+
+            chatMessages.push(chatMsg);
+            if (chatMessages.length > 500) chatMessages.shift();
+            saveMessages();
+
+            io.emit('chat message', chatMsg);
+            io.emit('chat_message', chatMsg);
+        } catch (err) {
+            console.error('Fehler beim Speichern der Mediendatei:', err);
+        }
+    });
+
+    socket.on('get_user_profile', (username, callback) => {
+        const profile = db.profiles[username] || { username, bio: 'Keine Bio angegeben.', rank: 'Agent', audioInputId: '', audioOutputId: '' };
+        if (typeof callback === 'function') callback(profile);
+    });
+
+    socket.on('get_friends', (username, callback) => {
+        if (typeof callback === 'function') callback(db.friends[username] || []);
+    });
+
+    socket.on('get_friend_requests', (username, callback) => {
+        if (typeof callback === 'function') callback(db.requests[username] || []);
+    });
+
+    socket.on('check_friendship_status', (data, callback) => {
+        const { username, targetUser } = data;
+        const isFriend = db.friends[username]?.includes(targetUser);
+        const requestSent = db.requests[targetUser]?.includes(username);
+        const requestReceived = db.requests[username]?.includes(targetUser);
+        if (typeof callback === 'function') callback({ isFriend, requestSent, requestReceived });
+    });
+
+    socket.on('send_friend_request', (data, callback) => {
+        const { username, targetName } = data;
+
+        if (!targetName || targetName.trim() === '') {
+            return callback({ success: false, message: 'Ungültiger Benutzer.' });
+        }
+        if (username === targetName) {
+            return callback({ success: false, message: 'Du kannst dir selbst keine Anfrage senden.' });
+        }
+        if (db.friends[username]?.includes(targetName)) {
+            return callback({ success: false, message: 'Ihr seid bereits befreundet.' });
+        }
+
+        if (!db.requests[targetName]) db.requests[targetName] = [];
+        if (db.requests[targetName].includes(username)) {
+            return callback({ success: false, message: 'Es wurde bereits eine Anfrage gesendet.' });
+        }
+
+        if (db.requests[username]?.includes(targetName)) {
+            db.requests[username] = db.requests[username].filter(u => u !== targetName);
+
+            if (!db.friends[username]) db.friends[username] = [];
+            if (!db.friends[targetName]) db.friends[targetName] = [];
+
+            if (!db.friends[username].includes(targetName)) db.friends[username].push(targetName);
+            if (!db.friends[targetName].includes(username)) db.friends[targetName].push(username);
+
+            saveDatabase();
+            return callback({ success: true, message: 'Ihr seid nun befreundet!' });
+        }
+
+        db.requests[targetName].push(username);
+        saveDatabase();
+        if (typeof callback === 'function') callback({ success: true, message: `Freundschaftsanfrage an ${targetName} gesendet!` });
+    });
+
+    socket.on('respond_friend_request', (data, callback) => {
+        const { username, senderName, accept } = data;
+
+        if (db.requests[username]) {
+            db.requests[username] = db.requests[username].filter(u => u !== senderName);
+        }
+
+        if (accept) {
+            if (!db.friends[username]) db.friends[username] = [];
+            if (!db.friends[senderName]) db.friends[senderName] = [];
+
+            if (!db.friends[username].includes(senderName)) db.friends[username].push(senderName);
+            if (!db.friends[senderName].includes(username)) db.friends[senderName].push(username);
+        }
+
+        saveDatabase();
+        if (typeof callback === 'function') callback({ success: true });
+    });
+
+    socket.on('remove_friend', (data, callback) => {
+        const { username, friendName } = data;
+
+        if (db.friends[username]) {
+            db.friends[username] = db.friends[username].filter(f => f !== friendName);
+        }
+        if (db.friends[friendName]) {
+            db.friends[friendName] = db.friends[friendName].filter(f => f !== username);
+        }
+
+        saveDatabase();
+        if (typeof callback === 'function') callback({ success: true, friends: db.friends[username] || [] });
+    });
+});
+
+app.get('/api/view-db', (req, res) => {
+    if (fs.existsSync(dbFile)) {
+        const data = fs.readFileSync(dbFile, 'utf8');
+        res.setHeader('Content-Type', 'application/json');
+        res.send(data);
+    } else {
+        res.status(404).json({ success: false, message: 'Keine database.json gefunden.' });
+    }
+});
+app.get('/api/view-messages', (req, res) => {
+    if (fs.existsSync(messagesFile)) {
+        const data = fs.readFileSync(messagesFile, 'utf8');
+        res.setHeader('Content-Type', 'application/json');
+        res.send(data);
+    } else {
+        res.status(404).json({ success: false, message: 'Keine messages.json gefunden.' });
     }
 });
 
