@@ -13,6 +13,10 @@
             <h2 id="auth-title">Outer Heaven - Login</h2>
             <input type="text" id="username" placeholder="Benutzername">
             <input type="password" id="passwort" placeholder="Passwort">
+            
+            <!-- Admin-Schlüssel Feld (wird bei Registrierung dynamisch angezeigt) -->
+            <input type="password" id="admin-secret-input" placeholder="Admin-Schlüssel (optional)" style="display:none;">
+
             <button id="auth-submit-btn" onclick="handleAuth()">Einloggen</button>
             <button class="switch-btn" id="switch-mode-btn" onclick="toggleAuthMode()">Noch kein Konto? Registrieren</button>
         </div>
@@ -79,6 +83,11 @@
             <img id="modal-avatar" src="" alt="Avatar" style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover; margin: 10px auto; border: 2px solid #2ecc71;">
             <p style="color: #b9bbbe;"><strong>Rang:</strong> <span id="modal-rank" style="color: #fff;">Agent</span></p>
             <p style="color: #b9bbbe;"><strong>Bio:</strong> <span id="modal-bio-text" style="color: #fff;">Keine Bio hinterlegt.</span></p>
+
+            <div id="admin-actions-container" style="margin-top: 10px; display: none; flex-direction: column; gap: 5px;">
+                <button class="control-btn" style="background: #e67e22; width: 100%; font-size: 11px;" onclick="adminKickUser()">Aus Kanal kicken</button>
+                <button class="control-btn" style="background: #ed4245; width: 100%; font-size: 11px;" onclick="adminBanUser()">Vom Server bannen</button>
+            </div>
 
             <button id="modal-friend-action-btn" class="control-btn" style="width: 100%; margin-top: 10px; background: #2ecc71;" onclick="handleProfileFriendAction()">Als Freund hinzufügen</button>
             <button class="control-btn" style="background: #ed4245; width: 100%; margin-top: 10px;" onclick="closeProfileModal()">Schließen</button>
@@ -167,14 +176,8 @@
 
         function handleIncomingMessageEvent(data) {
             window.allLoadedMessages = window.allLoadedMessages || [];
-            if (!window.allLoadedMessages.some(m => m.timestamp === data.timestamp && m.user === (data.user || data.username) && m.text === (data.text || data.message))) {
-                window.allLoadedMessages.push({
-                    channel: data.channel || 'allgemein',
-                    user: data.user || data.username || 'Unbekannt',
-                    text: data.text || data.message || '',
-                    avatar: data.avatar || '/default-avatar.png',
-                    timestamp: data.timestamp || ''
-                });
+            if (!window.allLoadedMessages.some(m => m.id === data.id)) {
+                window.allLoadedMessages.push(data);
             }
 
             const targetChannel = data.channel || 'allgemein';
@@ -185,6 +188,23 @@
 
         socket.on('chat_message', handleIncomingMessageEvent);
         socket.on('chat message', handleIncomingMessageEvent);
+
+        socket.on('message_deleted', (data) => {
+            if (window.allLoadedMessages) {
+                window.allLoadedMessages = window.allLoadedMessages.filter(m => m.id !== data.messageId);
+                renderMessagesForCurrentChannel();
+            }
+        });
+
+        socket.on('message_marked', (data) => {
+            if (window.allLoadedMessages) {
+                const msg = window.allLoadedMessages.find(m => m.id === data.messageId);
+                if (msg) {
+                    msg.marked = data.marked;
+                    renderMessagesForCurrentChannel();
+                }
+            }
+        });
 
         window.sendMessage = function() {
             const input = document.getElementById('msg-input');
@@ -222,6 +242,14 @@
                 document.getElementById('modal-rank').innerText = profile.rank || 'Agent';
                 document.getElementById('modal-bio-text').innerText = profile.bio || 'Keine Bio angegeben.';
 
+                const adminActions = document.getElementById('admin-actions-container');
+                const isUserAdmin = currentUser && (currentUser.role === 'Admin' || currentUser.role === 'Mod');
+                if (isUserAdmin && username !== currentUserName) {
+                    adminActions.style.display = 'flex';
+                } else {
+                    adminActions.style.display = 'none';
+                }
+
                 const actionBtn = document.getElementById('modal-friend-action-btn');
                 if (username === currentUserName) {
                     actionBtn.style.display = 'none';
@@ -246,6 +274,24 @@
 
                 document.getElementById('user-profile-modal').style.display = 'flex';
             });
+        }
+
+        function adminKickUser() {
+            if (!activeProfileUser) return;
+            socket.emit('admin_kick', { targetUser: activeProfileUser, channel: currentChannel }, (res) => {
+                alert(res.message);
+                closeProfileModal();
+            });
+        }
+
+        function adminBanUser() {
+            if (!activeProfileUser) return;
+            if (confirm(`Möchtest du ${activeProfileUser} wirklich vom Server bannen?`)) {
+                socket.emit('admin_ban', { targetUser: activeProfileUser }, (res) => {
+                    alert(res.message);
+                    closeProfileModal();
+                });
+            }
         }
 
         function closeProfileModal() {
