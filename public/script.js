@@ -26,24 +26,30 @@ function toggleAuthMode() {
     document.getElementById('auth-title').innerText = isRegistering ? 'Outer Heaven - Registrieren' : 'Outer Heaven - Login';
     document.getElementById('auth-submit-btn').innerText = isRegistering ? 'Registrieren' : 'Einloggen';
     document.getElementById('switch-mode-btn').innerText = isRegistering ? 'Bereits ein Konto? Einloggen' : 'Noch kein Konto? Registrieren';
+    
+    // Admin-Schlüssel Feld bei Registrierung anzeigen
+    document.getElementById('admin-secret-input').style.display = isRegistering ? 'block' : 'none';
 }
 
 async function handleAuth() {
     const username = document.getElementById('username').value.trim();
     const password = document.getElementById('passwort').value.trim();
+    const adminSecret = document.getElementById('admin-secret-input').value.trim();
     if(!username || !password) return alert('Bitte alle Felder ausfüllen!');
 
     const endpoint = isRegistering ? '/api/register' : '/api/login';
+    const payload = isRegistering ? { username, password, adminSecret } : { username, password };
+
     const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify(payload)
     });
     const data = await res.json();
 
     if(data.success) {
         if(isRegistering) {
-            alert('Registrierung erfolgreich! Bitte nun einloggen.');
+            alert(data.message || 'Registrierung erfolgreich! Bitte nun einloggen.');
             toggleAuthMode();
         } else {
             currentUser = { 
@@ -67,7 +73,7 @@ function logout() {
 
 function initApp() {
     document.getElementById('auth-screen').style.display = 'none';
-    document.getElementById('user-name-disp').innerText = currentUser.username;
+    document.getElementById('user-name-disp').innerText = `${currentUser.username} (${currentUser.role || 'Agent'})`;
     updateUserAvatarUI();
     socket.emit('join chat', currentUser);
     socket.emit('set_user_info', { username: currentUser.username });
@@ -223,13 +229,36 @@ function appendMessageToDOM(msg) {
     const container = document.getElementById('chat-messages');
     const userName = msg.user || msg.username || 'Unbekannt';
     const msgText = msg.text || msg.message || '';
+    const isMarked = msg.marked ? 'border-left: 4px solid #f1c40f; background: rgba(241,196,15,0.05);' : '';
+    
+    const isPrivileged = currentUser && (currentUser.role === 'Admin' || currentUser.role === 'Mod');
+    let adminControls = '';
+    if (isPrivileged) {
+        adminControls = `
+            <span style="margin-left: auto; display: flex; gap: 5px;">
+                <button onclick="toggleMarkMessage('${msg.id}')" style="background: #f1c40f; border: none; font-size: 10px; padding: 2px 5px; cursor: pointer; border-radius: 3px;" title="Markieren">⭐</button>
+                <button onclick="deleteMessage('${msg.id}')" style="background: #ed4245; border: none; font-size: 10px; color: #fff; padding: 2px 5px; cursor: pointer; border-radius: 3px;" title="Löschen">🗑️</button>
+            </span>
+        `;
+    }
 
     container.innerHTML += `
-        <div class="message">
-            <span class="msg-user">${userName}</span>
+        <div class="message" id="msg-${msg.id}" style="padding: 4px; border-radius: 4px; ${isMarked}">
+            <div style="display: flex; align-items: center;">
+                <span class="msg-user" onclick="openUserProfile('${userName}')" style="cursor: pointer; color: #2ecc71;">${userName}</span>
+                ${adminControls}
+            </div>
             <span class="msg-text">${msgText}</span>
         </div>
     `;
+}
+
+function deleteMessage(messageId) {
+    socket.emit('delete_message', { messageId });
+}
+
+function toggleMarkMessage(messageId) {
+    socket.emit('toggle_mark_message', { messageId });
 }
 
 socket.on('load_history', (messages) => {
