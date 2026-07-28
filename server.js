@@ -20,6 +20,16 @@ if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
+// Hilfsfunktion für die echte deutsche Uhrzeit (24-Stunden-Format)
+function getFormattedTime() {
+    return new Intl.DateTimeFormat('de-DE', {
+        timeZone: 'Europe/Berlin',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+    }).format(new Date());
+}
+
 const dbFile = path.join(__dirname, 'database.json');
 
 let db = {
@@ -240,7 +250,7 @@ io.on('connection', (socket) => {
         messages: chatMessages
     });
     socket.emit('load_history', chatMessages);
-    
+
     // Privaten Nachrichtenverlauf beim Verbinden an den Client senden
     socket.emit('load_private_history', privateMessages);
 
@@ -389,12 +399,12 @@ io.on('connection', (socket) => {
             sender: sender,
             recipient: recipient,
             text: text,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            timestamp: getFormattedTime()
         };
 
         privateMessages.push(pmObj);
         if (privateMessages.length > 500) privateMessages.shift();
-        savePrivateMessages(); // <-- Hier wird es nun dauerhaft in privatemessage.json gespeichert
+        savePrivateMessages();
 
         for (let [id, s] of io.sockets.sockets) {
             if (s.username === recipient || s.username === sender) {
@@ -550,7 +560,7 @@ io.on('connection', (socket) => {
             text: text,
             marked: false,
             avatar: db.profiles[username]?.avatar || '/default-avatar.png',
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            timestamp: getFormattedTime()
         };
 
         chatMessages.push(chatMsg);
@@ -618,7 +628,7 @@ io.on('connection', (socket) => {
                 text: messageHTML,
                 marked: false,
                 avatar: db.profiles[username]?.avatar || '/default-avatar.png',
-                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                timestamp: getFormattedTime()
             };
 
             chatMessages.push(chatMsg);
