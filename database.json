@@ -2,16 +2,24 @@
   "profiles": {
     "VenomSnake_Twitch": {
       "username": "VenomSnake_Twitch",
-      "audioInputId": "ecc4d70603a1c730049ef6405a2f8149bbb6da9d7f4dbacdcfeba376a0f2263c",
-      "audioOutputId": "9efa0ceb1e73e6ecdaea00d3378e56a689b83bd5180ff690e222c705b1906673"
-    },
+      "password": "venom30",
+      "rank": "Agent",
+      "bio": "Twitch Streamer.",
+      "avatar": "/default-avatar.png",
+      "audioInputId": "",
+      "audioOutputId": ""
+    }
     {
   "profiles": {
     "VenomSnake_Twitch": {
       "username": "T-800",
-      "audioInputId": "ecc4d70603a1c730049ef6405a2f8149bbb6da9d7f4dbacdcfeba376a0f2263c",
-      "audioOutputId": "9efa0ceb1e73e6ecdaea00d3378e56a689b83bd5180ff690e222c705b1906673"
-    },
+      "password": "Hilgert1987",
+      "rank": "Agent",
+      "bio": "Keine Bio angegeben.",
+      "avatar": "/default-avatar.png",
+      "audioInputId": "",
+      "audioOutputId": ""
+    }
     "SolidSnake": {
       "username": "SolidSnake",
       "audioInputId": "edd92fc9ba115de64bc78ff92cf0198c67355b819b729ba701a3cddd1fcdadcb",
