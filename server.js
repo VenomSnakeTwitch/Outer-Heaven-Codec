@@ -1,12 +1,11 @@
 const express = require('express');
-const http = require('http');
+const httpModule = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
 const fs = require('fs');
 
 const app = express();
-
-const server = http.createServer(app);
+const server = httpModule.createServer(app);
 const io = new Server(server, {
     maxHttpBufferSize: 3e9
 });
@@ -27,7 +26,6 @@ let db = {
     profiles: {},
     friends: {},
     requests: {},
-    messages: [],
     channels: {
         text: ['allgemein', 'gta-online'],
         voice: ['Lobby']
@@ -41,18 +39,7 @@ if (fs.existsSync(dbFile)) {
         if (!db.profiles) db.profiles = {};
         if (!db.friends) db.friends = {};
         if (!db.requests) db.requests = {};
-        if (!db.messages) db.messages = {}; // Als Objekt oder Array (wir behalten Arrays pro Kanal bei Bedarf oder filtern)
         if (!db.channels) db.channels = { text: ['allgemein', 'gta-online'], voice: ['Lobby'] };
-        
-        // Falls messages bisher ein Array waren, mappen wir sie sauber auf Kanäle falls nötig
-        if (Array.isArray(db.messages)) {
-            const oldMessages = db.messages;
-            db.messages = [];
-            oldMessages.forEach(m => {
-                const ch = m.channel || 'allgemein';
-                db.messages.push({ ...m, channel: ch });
-            });
-        }
     } catch (err) {
         console.error('Fehler beim Laden der database.json:', err);
     }
@@ -63,6 +50,28 @@ function saveDatabase() {
         fs.writeFileSync(dbFile, JSON.stringify(db, null, 2), 'utf8');
     } catch (err) {
         console.error('Fehler beim Speichern der database.json:', err);
+    }
+}
+
+// --- Separate Nachrichten-Datenbank (messages.json) ---
+const messagesFile = path.join(__dirname, 'messages.json');
+let chatMessages = [];
+
+if (fs.existsSync(messagesFile)) {
+    try {
+        const msgData = fs.readFileSync(messagesFile, 'utf8');
+        chatMessages = JSON.parse(msgData);
+        if (!Array.isArray(chatMessages)) chatMessages = [];
+    } catch (err) {
+        console.error('Fehler beim Laden der messages.json:', err);
+    }
+}
+
+function saveMessages() {
+    try {
+        fs.writeFileSync(messagesFile, JSON.stringify(chatMessages, null, 2), 'utf8');
+    } catch (err) {
+        console.error('Fehler beim Speichern der messages.json:', err);
     }
 }
 
@@ -166,12 +175,11 @@ function getVoiceChannelUsers(channelName) {
 }
 
 io.on('connection', (socket) => {
-    // Sende den gesamten Verlauf und Kanäle an den Client
     socket.emit('init state', {
         channels: db.channels,
-        messages: db.messages
+        messages: chatMessages
     });
-    socket.emit('load_history', db.messages);
+    socket.emit('load_history', chatMessages);
 
     socket.on('set_user_info', (data) => {
         if (!data || !data.username) return;
@@ -203,8 +211,7 @@ io.on('connection', (socket) => {
         db.channels[type].push(name);
         saveDatabase();
 
-        // Informiere alle Clients über neue Kanäle
-        io.emit('init state', { channels: db.channels, messages: db.messages });
+        io.emit('init state', { channels: db.channels, messages: chatMessages });
         if (typeof callback === 'function') callback({ success: true });
     });
 
@@ -328,7 +335,7 @@ io.on('connection', (socket) => {
     function handleIncomingMessage(data) {
         const username = socket.username || data.user || data.username || 'Unbekannt';
         let text = data.text || data.message || '';
-        const channel = data.channel || 'allgemein'; // Nimmt exakt den übergebenen Kanal!
+        const channel = data.channel || 'allgemein';
 
         const urlRegex = /(https?:\/\/[^\s]+)/g;
         text = text.replace(urlRegex, (url) => {
@@ -356,9 +363,9 @@ io.on('connection', (socket) => {
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         };
 
-        db.messages.push(chatMsg);
-        if (db.messages.length > 300) db.messages.shift();
-        saveDatabase();
+        chatMessages.push(chatMsg);
+        if (chatMessages.length > 500) chatMessages.shift();
+        saveMessages();
 
         io.emit('chat message', chatMsg);
     }
@@ -420,9 +427,9 @@ io.on('connection', (socket) => {
                 timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             };
 
-            db.messages.push(chatMsg);
-            if (db.messages.length > 300) db.messages.shift();
-            saveDatabase();
+            chatMessages.push(chatMsg);
+            if (chatMessages.length > 500) chatMessages.shift();
+            saveMessages();
 
             io.emit('chat message', chatMsg);
         } catch (err) {
