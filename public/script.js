@@ -179,7 +179,6 @@ function renderChannels(channels) {
     voiceDiv.innerHTML = '';
 
     channels.text.forEach(ch => {
-        // Visuelle Hervorhebung des aktiven Textkanals über die CSS-Klasse 'active'
         const isActive = (currentChannel === ch);
         textDiv.innerHTML += `<div class="channel-item ${isActive ? 'active' : ''}" onclick="switchChannel('text', '${ch}')"># ${ch}</div>`;
     });
@@ -200,7 +199,6 @@ function switchChannel(type, name) {
         
         document.getElementById('msg-input').placeholder = `Nachricht an #${name} senden...`;
 
-        // UI-Leiste sofort aktualisieren, damit die Markierung an der Seite sofort umschaltet
         renderChannels(globalChannelsData);
         renderMessagesForCurrentChannel();
     }
@@ -212,7 +210,6 @@ function renderMessagesForCurrentChannel() {
     
     window.allLoadedMessages = window.allLoadedMessages || [];
     
-    // Strenger Filter: Zeigt ausschließlich Nachrichten an, die exakt zu diesem Kanal gehören
     window.allLoadedMessages.forEach(msg => {
         const targetChannel = msg.channel || 'allgemein';
         if (targetChannel === currentChannel) {
@@ -245,7 +242,6 @@ socket.on('chat message', (msg) => {
     window.allLoadedMessages.push(msg);
 
     const targetChannel = msg.channel || 'allgemein';
-    // Nachricht nur rendern, wenn man gerade genau in diesem Kanal ist
     if (targetChannel === currentChannel) {
         appendMessageToDOM(msg);
         const container = document.getElementById('chat-messages');
@@ -270,7 +266,6 @@ function sendMessage() {
     input.value = '';
 }
 
-// --- SPRACHKANAL BEITRETEN ---
 async function joinVoiceChannel(channelName) {
     if(currentVoiceChannel || activeCallTarget) leaveVoiceChannel();
     currentVoiceChannel = channelName;
@@ -285,7 +280,6 @@ async function joinVoiceChannel(channelName) {
     socket.emit('join_voice_channel', { channelName: channelName });
 }
 
-// --- DIREKT-ANRUF FÜR FREUNDE ---
 async function startDirectCall(targetUsername) {
     if(currentVoiceChannel || activeCallTarget) leaveVoiceChannel();
     activeCallTarget = targetUsername;
