@@ -166,29 +166,30 @@
     <script src="script.js"></script>
     <script>
         socket.off('chat_message');
+        socket.off('chat message');
 
-        socket.on('chat_message', (data) => {
-            const container = document.getElementById('chat-messages');
-            if (!container) return;
+        // Einheitlicher Event-Listener mit Kanal-Filterprüfung
+        function handleIncomingMessageEvent(data) {
+            window.allLoadedMessages = window.allLoadedMessages || [];
+            // Vermeide Duplikate, falls Event mehrfach feuert
+            if (!window.allLoadedMessages.some(m => m.timestamp === data.timestamp && m.user === (data.user || data.username) && m.text === (data.text || data.message))) {
+                window.allLoadedMessages.push({
+                    channel: data.channel || 'allgemein',
+                    user: data.user || data.username || 'Unbekannt',
+                    text: data.text || data.message || '',
+                    avatar: data.avatar || '/default-avatar.png',
+                    timestamp: data.timestamp || ''
+                });
+            }
 
-            const avatarHTML = data.avatar 
-                ? `<img src="${data.avatar}" style="width:24px; height:24px; border-radius:50%; vertical-align:middle; margin-right:5px; object-fit:cover;">` 
-                : '';
+            const targetChannel = data.channel || 'allgemein';
+            if (targetChannel === currentChannel) {
+                renderMessagesForCurrentChannel();
+            }
+        }
 
-            const timestampText = data.timestamp ? `[${data.timestamp}]` : '';
-
-            container.innerHTML += `
-                <div class="message" style="margin-bottom: 8px;">
-                    <div>
-                        ${avatarHTML}
-                        <span class="msg-user" onclick="openUserProfile('${data.username}')" style="cursor:pointer; color:#00aff4; text-decoration:underline; font-weight:bold;">${data.username}</span>
-                        <span style="font-size: 11px; color: #888; margin-left: 5px;">${timestampText}</span>
-                    </div>
-                    <div class="msg-text" style="margin-left: 29px; color: #fff;">${data.message}</div>
-                </div>
-            `;
-            container.scrollTop = container.scrollHeight;
-        });
+        socket.on('chat_message', handleIncomingMessageEvent);
+        socket.on('chat message', handleIncomingMessageEvent);
 
         window.sendMessage = function() {
             const input = document.getElementById('msg-input');
@@ -199,6 +200,7 @@
                 const currentUserName = (typeof currentUser !== 'undefined' && currentUser.username) ? currentUser.username : (document.getElementById('user-name-disp')?.innerText || 'Agent');
 
                 socket.emit('chat_message', {
+                    channel: currentChannel,
                     username: currentUserName,
                     message: text
                 });
@@ -303,7 +305,8 @@
                 voiceContainer.innerHTML = '';
 
                 (channels.text || ['allgemein']).forEach(ch => {
-                    textContainer.innerHTML += `<div class="channel-item" onclick="switchChannel('text', '${ch}')"># ${ch}</div>`;
+                    const isActive = (currentChannel === ch);
+                    textContainer.innerHTML += `<div class="channel-item ${isActive ? 'active' : ''}" onclick="switchChannel('text', '${ch}')"># ${ch}</div>`;
                 });
 
                 (channels.voice || ['Lobby']).forEach(ch => {
@@ -312,13 +315,23 @@
             });
         }
 
-        function switchChannel(type, name) {
+        // Überschreibung von switchChannel für saubere UI-Aktualisierung und Nachrichtenfilterung
+        window.switchChannel = function(type, name) {
             if (type === 'text') {
+                currentChannel = name;
                 document.getElementById('current-channel-title').innerText = `# ${name}`;
                 document.getElementById('chat-messages').style.display = 'flex';
                 document.getElementById('video-grid').style.display = 'none';
                 document.getElementById('chat-input-area-box').style.display = 'flex';
                 document.getElementById('leave-voice-btn').style.display = 'none';
+                
+                const msgInput = document.getElementById('msg-input');
+                if(msgInput) msgInput.placeholder = `Nachricht an #${name} senden...`;
+
+                loadChannels();
+                if(typeof renderMessagesForCurrentChannel === 'function') {
+                    renderMessagesForCurrentChannel();
+                }
             }
         }
 
@@ -417,6 +430,7 @@
                 reader.onload = function(e) {
                     const currentUserName = (typeof currentUser !== 'undefined' && currentUser.username) ? currentUser.username : (document.getElementById('user-name-disp')?.innerText || 'Agent');
                     socket.emit('chat_media', {
+                        channel: currentChannel,
                         username: currentUserName,
                         type: 'image',
                         fileData: e.target.result
@@ -434,6 +448,7 @@
                 reader.onload = function(e) {
                     const currentUserName = (typeof currentUser !== 'undefined' && currentUser.username) ? currentUser.username : (document.getElementById('user-name-disp')?.innerText || 'Agent');
                     socket.emit('chat_media', {
+                        channel: currentChannel,
                         username: currentUserName,
                         type: 'audiofile',
                         fileData: e.target.result,
@@ -473,6 +488,7 @@
                             reader.onload = function(e) {
                                 const currentUserName = (typeof currentUser !== 'undefined' && currentUser.username) ? currentUser.username : (document.getElementById('user-name-disp')?.innerText || 'Agent');
                                 socket.emit('chat_media', {
+                                    channel: currentChannel,
                                     username: currentUserName,
                                     type: 'audio',
                                     fileData: e.target.result
