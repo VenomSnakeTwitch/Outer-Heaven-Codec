@@ -358,6 +358,7 @@ io.on('connection', (socket) => {
         const chatMsg = {
             channel: channel,
             user: username,
+            message: text,
             text: text,
             avatar: db.profiles[username]?.avatar || '/default-avatar.png',
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -368,6 +369,7 @@ io.on('connection', (socket) => {
         saveMessages();
 
         io.emit('chat message', chatMsg);
+        io.emit('chat_message', chatMsg);
     }
 
     socket.on('chat_media', (data) => {
@@ -422,6 +424,7 @@ io.on('connection', (socket) => {
             const chatMsg = {
                 channel: channel,
                 user: username,
+                message: messageHTML,
                 text: messageHTML,
                 avatar: db.profiles[username]?.avatar || '/default-avatar.png',
                 timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -432,6 +435,7 @@ io.on('connection', (socket) => {
             saveMessages();
 
             io.emit('chat message', chatMsg);
+            io.emit('chat_message', chatMsg);
         } catch (err) {
             console.error('Fehler beim Speichern der Mediendatei:', err);
         }
