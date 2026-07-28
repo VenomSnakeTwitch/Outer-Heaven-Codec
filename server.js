@@ -88,7 +88,6 @@ function saveMessages() {
 
 const ADMIN_SECRET_KEY = "admin123";
 
-// Hilfsfunktion zur Berechtigungsprüfung
 function hasPermission(username, permissionName) {
     const userProfile = db.profiles[username];
     if (!userProfile) return false;
@@ -352,6 +351,28 @@ io.on('connection', (socket) => {
             msg.marked = !msg.marked;
             saveMessages();
             io.emit('message_marked', { messageId, marked: msg.marked });
+        }
+    });
+
+    // Privatnachrichten-Events
+    socket.on('private_message', (data) => {
+        const { recipient, text } = data;
+        const sender = socket.username;
+        if (!sender || !recipient || !text) return;
+
+        const pmObj = {
+            id: 'pm_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+            sender: sender,
+            recipient: recipient,
+            text: text,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+
+        // An den Empfänger und den Sender selbst senden
+        for (let [id, s] of io.sockets.sockets) {
+            if (s.username === recipient || s.username === sender) {
+                s.emit('private_message', pmObj);
+            }
         }
     });
 
