@@ -269,7 +269,6 @@ io.on('connection', (socket) => {
         saveDatabase();
         broadcastOnlineUsers();
 
-        // Benachrichtige den betroffenen Benutzer live
         for (let [id, s] of io.sockets.sockets) {
             if (s.username === targetUser) {
                 s.emit('role_updated', { newRole });
@@ -295,7 +294,7 @@ io.on('connection', (socket) => {
                 break;
             }
         }
-        if (typeof callback === 'function') callback({ success: true, message: `${targetUser} wurde aus dem Kanal gekickt.` });
+        if (typeof callback === 'function') callback({ success: true, message: `${targetUser} wurde gekickt.` });
     });
 
     socket.on('admin_ban', (data, callback) => {
@@ -316,10 +315,9 @@ io.on('connection', (socket) => {
             }
         }
         broadcastOnlineUsers();
-        if (typeof callback === 'function') callback({ success: true, message: `${targetUser} wurde dauerhaft gebannt.` });
+        if (typeof callback === 'function') callback({ success: true, message: `${targetUser} wurde gebannt.` });
     });
 
-    // --- Nachrichten verwalten (Löschen & Markieren) ---
     socket.on('delete_message', (data) => {
         const { messageId } = data;
         const senderProfile = db.profiles[socket.username];
@@ -371,7 +369,6 @@ io.on('connection', (socket) => {
         if (typeof callback === 'function') callback({ success: true });
     });
 
-    // Standard-Events weiterleiten
     socket.on('chat message', handleIncomingMessage);
     socket.on('chat_message', handleIncomingMessage);
 
