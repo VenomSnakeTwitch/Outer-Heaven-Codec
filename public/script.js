@@ -196,7 +196,7 @@ function switchChannel(type, name) {
         document.getElementById('chat-input-area-box').style.display = 'flex';
         document.getElementById('video-grid').style.display = 'none';
         document.getElementById('leave-voice-btn').style.display = 'none';
-        
+
         document.getElementById('msg-input').placeholder = `Nachricht an #${name} senden...`;
 
         renderChannels(globalChannelsData);
@@ -207,9 +207,9 @@ function switchChannel(type, name) {
 function renderMessagesForCurrentChannel() {
     const container = document.getElementById('chat-messages');
     container.innerHTML = '';
-    
+
     window.allLoadedMessages = window.allLoadedMessages || [];
-    
+
     window.allLoadedMessages.forEach(msg => {
         const targetChannel = msg.channel || 'allgemein';
         if (targetChannel === currentChannel) {
@@ -223,7 +223,7 @@ function appendMessageToDOM(msg) {
     const container = document.getElementById('chat-messages');
     const userName = msg.user || msg.username || 'Unbekannt';
     const msgText = msg.text || msg.message || '';
-    
+
     container.innerHTML += `
         <div class="message">
             <span class="msg-user">${userName}</span>
@@ -257,7 +257,7 @@ function sendMessage() {
     const input = document.getElementById('msg-input');
     const text = input.value.trim();
     if(!text) return;
-    
+
     socket.emit('chat message', { 
         channel: currentChannel, 
         user: currentUser ? currentUser.username : 'Anonym',
