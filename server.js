@@ -335,7 +335,7 @@ io.on('connection', (socket) => {
     function handleIncomingMessage(data) {
         const username = socket.username || data.user || data.username || 'Unbekannt';
         let text = data.text || data.message || '';
-        const channel = data.channel || 'allgemein'; // Kanal wird hier sauber ausgelesen
+        const channel = data.channel || 'allgemein';
 
         const urlRegex = /(https?:\/\/[^\s]+)/g;
         text = text.replace(urlRegex, (url) => {
@@ -356,7 +356,7 @@ io.on('connection', (socket) => {
         });
 
         const chatMsg = {
-            channel: channel, // Kanal wird zwingend mitgespeichert!
+            channel: channel,
             user: username,
             text: text,
             avatar: db.profiles[username]?.avatar || '/default-avatar.png',
