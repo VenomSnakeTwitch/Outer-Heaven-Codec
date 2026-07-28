@@ -143,12 +143,9 @@
             <div class="chat-input-wrapper" style="display: flex; gap: 5px; width: 100%;">
                 <input type="text" id="msg-input" placeholder="Nachricht an #allgemein senden..." onkeydown="checkSend(event)" style="flex: 1;">
 
-                <label title="Bild senden" style="cursor: pointer; background: #2f3136; padding: 6px 10px; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #b9bbbe;">
-                    📷 <input type="file" id="chat-image-input" accept="image/*" style="display: none;" onchange="sendImage(this)">
-                </label>
-
-                <label title="Audiodatei senden (MP3)" style="cursor: pointer; background: #2f3136; padding: 6px 10px; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #b9bbbe;">
-                    🎵 <input type="file" id="chat-audio-file-input" accept="audio/*" style="display: none;" onchange="sendAudioFile(this)">
+                <!-- Allgemeiner Upload-Button für Bilder, Audio und Videos -->
+                <label title="Datei senden (Bild, Audio, Video)" style="cursor: pointer; background: #2f3136; padding: 6px 10px; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #b9bbbe;">
+                    📁 <input type="file" id="general-file-input" accept="image/*,audio/*,video/*" style="display: none;" onchange="handleGeneralUpload(this)">
                 </label>
 
                 <button id="voice-record-btn" onclick="toggleVoiceRecording()" title="Sprachnachricht aufnehmen" style="cursor: pointer; background: #2f3136; border: 1px solid #444; border-radius: 4px; padding: 6px 10px; color: #b9bbbe;">
@@ -171,7 +168,6 @@
         // Einheitlicher Event-Listener mit Kanal-Filterprüfung
         function handleIncomingMessageEvent(data) {
             window.allLoadedMessages = window.allLoadedMessages || [];
-            // Vermeide Duplikate, falls Event mehrfach feuert
             if (!window.allLoadedMessages.some(m => m.timestamp === data.timestamp && m.user === (data.user || data.username) && m.text === (data.text || data.message))) {
                 window.allLoadedMessages.push({
                     channel: data.channel || 'allgemein',
@@ -315,7 +311,6 @@
             });
         }
 
-        // Überschreibung von switchChannel für saubere UI-Aktualisierung und Nachrichtenfilterung
         window.switchChannel = function(type, name) {
             if (type === 'text') {
                 currentChannel = name;
@@ -423,34 +418,25 @@
 
         setInterval(loadFriendsAndRequests, 3000);
 
-        function sendImage(input) {
+        // Universelle Upload-Funktion für den allgemeinen Button
+        function handleGeneralUpload(input) {
             if (input.files && input.files[0]) {
                 const file = input.files[0];
                 const reader = new FileReader();
-                reader.onload = function(e) {
-                    const currentUserName = (typeof currentUser !== 'undefined' && currentUser.username) ? currentUser.username : (document.getElementById('user-name-disp')?.innerText || 'Agent');
-                    socket.emit('chat_media', {
-                        channel: currentChannel,
-                        username: currentUserName,
-                        type: 'image',
-                        fileData: e.target.result
-                    });
-                };
-                reader.readAsDataURL(file);
-                input.value = '';
-            }
-        }
+                
+                let mediaType = 'image';
+                if (file.type.startsWith('audio/')) {
+                    mediaType = 'audiofile';
+                } else if (file.type.startsWith('video/')) {
+                    mediaType = 'video';
+                }
 
-        function sendAudioFile(input) {
-            if (input.files && input.files[0]) {
-                const file = input.files[0];
-                const reader = new FileReader();
                 reader.onload = function(e) {
                     const currentUserName = (typeof currentUser !== 'undefined' && currentUser.username) ? currentUser.username : (document.getElementById('user-name-disp')?.innerText || 'Agent');
                     socket.emit('chat_media', {
                         channel: currentChannel,
                         username: currentUserName,
-                        type: 'audiofile',
+                        type: mediaType,
                         fileData: e.target.result,
                         fileName: file.name
                     });
