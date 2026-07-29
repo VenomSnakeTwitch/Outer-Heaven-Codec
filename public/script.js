@@ -185,7 +185,6 @@ socket.on('update_online_users', (users) => {
     }
 
     users.forEach(u => {
-        const isSelf = currentUser && u.username === currentUser.username;
         const roleColor = u.role === 'Admin' ? '#e67e22' : (u.role === 'Mod' ? '#3498db' : '#2ecc71');
         list.innerHTML += `
             <div onclick="openUserProfile('${u.username}')" style="display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; font-size: 12px;" title="Profil anzeigen">
@@ -331,8 +330,7 @@ function createPeerConnection(peerId) {
     return pc;
 }
 
-// Mikrofon-Test in den Einstellungen
-let testAudioContext = null;
+// Mikrofon-Test
 window.testMicrophone = function() {
     const statusSpan = document.getElementById('mic-test-status');
     const micSelect = document.getElementById('audio-input-select');
@@ -344,7 +342,6 @@ window.testMicrophone = function() {
         .then(stream => {
             statusSpan.style.color = '#2ecc71';
             statusSpan.innerText = 'Mikrofon funktioniert! Audio wird erkannt.';
-            
             setTimeout(() => {
                 stream.getTracks().forEach(track => track.stop());
                 statusSpan.innerText = '';
