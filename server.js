@@ -96,61 +96,6 @@ function saveMessages() {
     }
 }
 
-// --- HTTP-Registrierungs-Endpunkt ---
-app.post('/api/register', (req, res) => {
-    const { username, password, adminSecret } = req.body;
-
-    if (!username || !password) {
-        return res.status(400).json({ success: false, message: 'Bitte Benutzername und Passwort eingeben.' });
-    }
-
-    if (db.profiles[username] && db.profiles[username].password) {
-        return res.status(400).json({ success: false, message: 'Benutzer existiert bereits.' });
-    }
-
-    let assignedRole = 'Agent';
-    if (adminSecret && adminSecret === 'OuterHeaven2026!') {
-        assignedRole = 'Admin';
-    }
-
-    db.profiles[username] = {
-        username: username,
-        password: password,
-        rank: assignedRole,
-        bio: 'Keine Bio angegeben.',
-        avatar: '/default-avatar.png',
-        audioInputId: '',
-        audioOutputId: ''
-    };
-
-    saveDatabase();
-    res.json({ success: true, message: 'Registrierung erfolgreich!', role: assignedRole });
-});
-
-// --- HTTP-Login-Endpunkt ---
-app.post('/api/login', (req, res) => {
-    const { username, password } = req.body;
-
-    if (!username || !password) {
-        return res.status(400).json({ success: false, message: 'Bitte Benutzername und Passwort eingeben.' });
-    }
-
-    const user = db.profiles[username];
-    if (!user || user.password !== password) {
-        return res.status(400).json({ success: false, message: 'Ungültiger Benutzername oder falsches Passwort.' });
-    }
-
-    res.json({ 
-        success: true, 
-        username: user.username, 
-        role: user.rank, 
-        avatar: user.avatar, 
-        bio: user.bio,
-        audioInputId: user.audioInputId || '',
-        audioOutputId: user.audioOutputId || ''
-    });
-});
-
 // Avatar-Upload Endpunkt
 app.post('/api/upload-avatar', (req, res) => {
     const { username, imageBase64 } = req.body;
@@ -206,6 +151,77 @@ io.on('connection', (socket) => {
         messages: chatMessages
     });
     socket.emit('load_history', chatMessages);
+
+    // --- Socket.io Registrierung ---
+    socket.on('register', (data, callback) => {
+        const { username, password, adminSecret } = data;
+
+        if (!username || !password) {
+            if (typeof callback === 'function') callback({ success: false, message: 'Bitte Benutzername und Passwort eingeben.' });
+            return;
+        }
+
+        if (db.profiles[username] && db.profiles[username].password) {
+            if (typeof callback === 'function') callback({ success: false, message: 'Benutzer existiert bereits.' });
+            return;
+        }
+
+        let assignedRole = 'Agent';
+        if (adminSecret && adminSecret === 'OuterHeaven2026!') {
+            assignedRole = 'Admin';
+        }
+
+        db.profiles[username] = {
+            username: username,
+            password: password,
+            rank: assignedRole,
+            bio: 'Keine Bio angegeben.',
+            avatar: '/default-avatar.png',
+            audioInputId: '',
+            audioOutputId: ''
+        };
+
+        saveDatabase();
+        if (typeof callback === 'function') {
+            callback({ 
+                success: true, 
+                message: 'Registrierung erfolgreich!', 
+                user: { username, role: assignedRole, avatar: '/default-avatar.png', bio: 'Keine Bio angegeben.' } 
+            });
+        }
+    });
+
+    // --- Socket.io Login ---
+    socket.on('login', (data, callback) => {
+        const { username, password } = data;
+
+        if (!username || !password) {
+            if (typeof callback === 'function') callback({ success: false, message: 'Bitte Benutzername und Passwort eingeben.' });
+            return;
+        }
+
+        const user = db.profiles[username];
+        if (!user || user.password !== password) {
+            if (typeof callback === 'function') callback({ success: false, message: 'Ungültiger Benutzername oder falsches Passwort.' });
+            return;
+        }
+
+        socket.username = user.username;
+
+        if (typeof callback === 'function') {
+            callback({ 
+                success: true, 
+                user: { 
+                    username: user.username, 
+                    role: user.rank, 
+                    avatar: user.avatar, 
+                    bio: user.bio,
+                    audioInputId: user.audioInputId || '',
+                    audioOutputId: user.audioOutputId || ''
+                } 
+            });
+        }
+    });
 
     socket.on('set_user_info', (data) => {
         if (!data || !data.username) return;
