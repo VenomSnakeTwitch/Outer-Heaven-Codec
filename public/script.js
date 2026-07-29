@@ -367,6 +367,49 @@ function handleGeneralUpload(input) {
     input.value = '';
 }
 
+function loadAudioDevices() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+        console.warn("MediaDevices API wird von diesem Browser nicht unterstützt.");
+        return;
+    }
+
+    navigator.mediaDevices.enumerateDevices()
+        .then(devices => {
+            const micSelect = document.getElementById('audio-input-select');
+            const outSelect = document.getElementById('audio-output-select');
+            if (!micSelect || !outSelect) return;
+
+            micSelect.innerHTML = '';
+            outSelect.innerHTML = '';
+
+            devices.forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.deviceId;
+                option.text = device.label || (device.kind === 'audioinput' ? `Mikrofon (${device.deviceId.slice(0, 5)}...)` : `Ausgabe (${device.deviceId.slice(0, 5)}...)`);
+                
+                if (device.kind === 'audioinput') {
+                    micSelect.appendChild(option);
+                } else if (device.kind === 'audiooutput') {
+                    outSelect.appendChild(option);
+                }
+            });
+
+            if (micSelect.options.length === 0) {
+                micSelect.innerHTML = '<option>Kein Mikrofon gefunden</option>';
+            }
+            if (outSelect.options.length === 0) {
+                outSelect.innerHTML = '<option>Kein Ausgabegerät gefunden</option>';
+            }
+        })
+        .catch(err => console.error("Fehler beim Laden der Audiogeräte:", err));
+}
+
+// Erweitere deine bestehende openSettings-Funktion so:
+function openSettings() { 
+    document.getElementById('settings-modal').style.display = 'flex';
+    loadAudioDevices(); // Geräte direkt beim Öffnen laden
+}
+
 // --- Einstellungen & Admin ---
 function openSettings() { document.getElementById('settings-modal').style.display = 'flex'; }
 function closeSettings() { document.getElementById('settings-modal').style.display = 'none'; }
