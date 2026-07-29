@@ -6,6 +6,7 @@ const fs = require('fs');
 
 const app = express();
 const server = httpModule.createServer(app);
+
 const io = new Server(server, {
     maxHttpBufferSize: 3e9
 });
@@ -19,7 +20,16 @@ if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// --- Datenbank-Dateisystem (database.json) ---
+// Hilfsfunktion für die echte deutsche Uhrzeit (24-Stunden-Format)
+function getFormattedTime() {
+    return new Intl.DateTimeFormat('de-DE', {
+        timeZone: 'Europe/Berlin',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+    }).format(new Date());
+}
+
 const dbFile = path.join(__dirname, 'database.json');
 
 let db = {
@@ -31,8 +41,8 @@ let db = {
         voice: ['Lobby']
     },
     roles: {
-        'Admin': { permissions: ['kick', 'ban', 'delete_messages', 'mark_messages', 'create_channel', 'manage_roles'] },
-        'Mod': { permissions: ['kick', 'ban', 'delete_messages', 'mark_messages', 'create_channel'] },
+        'Admin': { permissions: ['all'] },
+        'Mod': { permissions: ['kick', 'ban', 'delete_messages', 'mark_messages'] },
         'Agent': { permissions: [] }
     }
 };
@@ -47,8 +57,8 @@ if (fs.existsSync(dbFile)) {
         if (!db.channels) db.channels = { text: ['allgemein', 'gta-online'], voice: ['Lobby'] };
         if (!db.roles) {
             db.roles = {
-                'Admin': { permissions: ['kick', 'ban', 'delete_messages', 'mark_messages', 'create_channel', 'manage_roles'] },
-                'Mod': { permissions: ['kick', 'ban', 'delete_messages', 'mark_messages', 'create_channel'] },
+                'Admin': { permissions: ['all'] },
+                'Mod': { permissions: ['kick', 'ban', 'delete_messages', 'mark_messages'] },
                 'Agent': { permissions: [] }
             };
         }
@@ -65,7 +75,6 @@ function saveDatabase() {
     }
 }
 
-// --- Separate Nachrichten-Datenbank (messages.json) ---
 const messagesFile = path.join(__dirname, 'messages.json');
 let chatMessages = [];
 
@@ -74,15 +83,6 @@ if (fs.existsSync(messagesFile)) {
         const msgData = fs.readFileSync(messagesFile, 'utf8');
         chatMessages = JSON.parse(msgData);
         if (!Array.isArray(chatMessages)) chatMessages = [];
-        chatMessages = chatMessages.map((m, idx) => ({
-            id: m.id || `msg_${Date.now()}_${idx}`,
-            channel: m.channel || 'allgemein',
-            user: m.user || 'Unbekannt',
-            text: m.text || '',
-            avatar: m.avatar || '/default-avatar.png',
-            timestamp: m.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
-            marked: !!m.marked
-        }));
     } catch (err) {
         console.error('Fehler beim Laden der messages.json:', err);
     }
@@ -96,7 +96,93 @@ function saveMessages() {
     }
 }
 
-// Avatar-Upload Endpunkt
+// Privatnachrichten-Datei und Persistenz
+const privateMessagesFile = path.join(__dirname, 'privatemessage.json');
+let privateMessages = [];
+
+if (fs.existsSync(privateMessagesFile)) {
+    try {
+        const privData = fs.readFileSync(privateMessagesFile, 'utf8');
+        privateMessages = JSON.parse(privData);
+        if (!Array.isArray(privateMessages)) privateMessages = [];
+    } catch (err) {
+        console.error('Fehler beim Laden der privatemessage.json:', err);
+    }
+}
+
+function savePrivateMessages() {
+    try {
+        fs.writeFileSync(privateMessagesFile, JSON.stringify(privateMessages, null, 2), 'utf8');
+    } catch (err) {
+        console.error('Fehler beim Speichern der privatemessage.json:', err);
+    }
+}
+
+const ADMIN_SECRET_KEY = "admin123";
+
+function hasPermission(username, permissionName) {
+    const userProfile = db.profiles[username];
+    if (!userProfile) return false;
+    const roleName = userProfile.rank || 'Agent';
+    const roleData = db.roles[roleName];
+    if (!roleData) return false;
+    if (roleData.permissions.includes('all')) return true;
+    return roleData.permissions.includes(permissionName);
+}
+
+app.post('/api/register', (req, res) => {
+    const { username, password, adminSecret } = req.body;
+
+    if (!username || !password) {
+        return res.status(400).json({ success: false, message: 'Bitte Benutzername und Passwort eingeben.' });
+    }
+
+    if (db.profiles[username] && db.profiles[username].password) {
+        return res.status(400).json({ success: false, message: 'Benutzer existiert bereits.' });
+    }
+
+    let assignedRank = 'Agent';
+    if (adminSecret && adminSecret === ADMIN_SECRET_KEY) {
+        assignedRank = 'Admin';
+    }
+
+    db.profiles[username] = {
+        username: username,
+        password: password,
+        rank: assignedRank,
+        bio: 'Keine Bio angegeben.',
+        avatar: '/default-avatar.png',
+        audioInputId: '',
+        audioOutputId: ''
+    };
+
+    saveDatabase();
+    res.json({ success: true, message: `Registrierung als '${assignedRank}' erfolgreich!` });
+});
+
+app.post('/api/login', (req, res) => {
+    const { username, password } = req.body;
+
+    if (!username || !password) {
+        return res.status(400).json({ success: false, message: 'Bitte Benutzername und Passwort eingeben.' });
+    }
+
+    const user = db.profiles[username];
+    if (!user || user.password !== password) {
+        return res.status(400).json({ success: false, message: 'Ungültiger Benutzername oder falsches Passwort.' });
+    }
+
+    res.json({ 
+        success: true, 
+        username: user.username, 
+        role: user.rank, 
+        avatar: user.avatar, 
+        bio: user.bio,
+        audioInputId: user.audioInputId || '',
+        audioOutputId: user.audioOutputId || ''
+    });
+});
+
 app.post('/api/upload-avatar', (req, res) => {
     const { username, imageBase64 } = req.body;
     if (!username || !imageBase64) {
@@ -145,104 +231,28 @@ function getVoiceChannelUsers(channelName) {
     return users;
 }
 
-// Hilfsfunktion zum Abrufen aller aktuell verbundenen Online-Nutzer für die rechte Sidebar
-function getOnlineUsersList() {
-    const usersMap = new Map();
+function broadcastOnlineUsers() {
+    const onlineUsers = [];
     for (let [id, s] of io.sockets.sockets) {
         if (s.username) {
-            usersMap.set(s.username, {
+            onlineUsers.push({
                 username: s.username,
-                rank: db.profiles[s.username]?.rank || 'Agent',
-                avatar: db.profiles[s.username]?.avatar || '/default-avatar.png',
-                bio: db.profiles[s.username]?.bio || ''
+                role: db.profiles[s.username]?.rank || 'Agent'
             });
         }
     }
-    return Array.from(usersMap.values());
+    io.emit('update_online_users', onlineUsers);
 }
 
 io.on('connection', (socket) => {
     socket.emit('init state', {
         channels: db.channels,
-        messages: chatMessages,
-        users: getOnlineUsersList()
+        messages: chatMessages
     });
     socket.emit('load_history', chatMessages);
 
-    // Sende aktualisierte Online-Liste an alle Clients
-    io.emit('update_online_users', getOnlineUsersList());
-
-    // --- Socket.io Registrierung ---
-    socket.on('register', (data, callback) => {
-        const { username, password, adminSecret } = data;
-
-        if (!username || !password) {
-            if (typeof callback === 'function') callback({ success: false, message: 'Bitte Benutzername und Passwort eingeben.' });
-            return;
-        }
-
-        if (db.profiles[username] && db.profiles[username].password) {
-            if (typeof callback === 'function') callback({ success: false, message: 'Benutzer existiert bereits.' });
-            return;
-        }
-
-        let assignedRole = 'Agent';
-        if (adminSecret && adminSecret === 'OuterHeaven2026!') {
-            assignedRole = 'Admin';
-        }
-
-        db.profiles[username] = {
-            username: username,
-            password: password,
-            rank: assignedRole,
-            bio: 'Keine Bio angegeben.',
-            avatar: '/default-avatar.png',
-            audioInputId: '',
-            audioOutputId: ''
-        };
-
-        saveDatabase();
-        if (typeof callback === 'function') {
-            callback({ 
-                success: true, 
-                message: 'Registrierung erfolgreich!', 
-                user: { username, role: assignedRole, avatar: '/default-avatar.png', bio: 'Keine Bio angegeben.' } 
-            });
-        }
-    });
-
-    // --- Socket.io Login ---
-    socket.on('login', (data, callback) => {
-        const { username, password } = data;
-
-        if (!username || !password) {
-            if (typeof callback === 'function') callback({ success: false, message: 'Bitte Benutzername und Passwort eingeben.' });
-            return;
-        }
-
-        const user = db.profiles[username];
-        if (!user || user.password !== password) {
-            if (typeof callback === 'function') callback({ success: false, message: 'Ungültiger Benutzername oder falsches Passwort.' });
-            return;
-        }
-
-        socket.username = user.username;
-        io.emit('update_online_users', getOnlineUsersList());
-
-        if (typeof callback === 'function') {
-            callback({ 
-                success: true, 
-                user: { 
-                    username: user.username, 
-                    role: user.rank, 
-                    avatar: user.avatar, 
-                    bio: user.bio,
-                    audioInputId: user.audioInputId || '',
-                    audioOutputId: user.audioOutputId || ''
-                } 
-            });
-        }
-    });
+    // Privaten Nachrichtenverlauf beim Verbinden an den Client senden
+    socket.emit('load_private_history', privateMessages);
 
     socket.on('set_user_info', (data) => {
         if (!data || !data.username) return;
@@ -252,30 +262,22 @@ io.on('connection', (socket) => {
             ...data
         };
         saveDatabase();
-        io.emit('update_online_users', getOnlineUsersList());
+        broadcastOnlineUsers();
     });
 
     socket.on('get_channels', (callback) => {
         if (typeof callback === 'function') callback(db.channels);
     });
 
-    // Event für die rechte Nutzerliste / Admin-Abfragen
-    socket.on('get_online_users', (callback) => {
-        const users = getOnlineUsersList();
-        if (typeof callback === 'function') callback(users);
-        socket.emit('update_online_users', users);
-    });
-
-    socket.on('get_all_profiles', (callback) => {
-        if (typeof callback === 'function') {
-            callback({ success: true, profiles: db.profiles });
-        }
-    });
-
     socket.on('create_channel', (data, callback) => {
         const { type, name } = data;
         if (!type || !name) {
             if (typeof callback === 'function') callback({ success: false, message: 'Ungültige Daten.' });
+            return;
+        }
+
+        if (!hasPermission(socket.username, 'create_channel') && db.profiles[socket.username]?.rank !== 'Admin') {
+            if (typeof callback === 'function') callback({ success: false, message: 'Keine Berechtigung zum Erstellen von Kanälen.' });
             return;
         }
 
@@ -288,59 +290,73 @@ io.on('connection', (socket) => {
         db.channels[type].push(name);
         saveDatabase();
 
-        io.emit('init state', { channels: db.channels, messages: chatMessages, users: getOnlineUsersList() });
+        io.emit('init state', { channels: db.channels, messages: chatMessages });
         if (typeof callback === 'function') callback({ success: true });
     });
 
     socket.on('get_roles_data', (callback) => {
-        if (typeof callback === 'function') {
-            callback({ success: true, roles: db.roles });
+        if (!hasPermission(socket.username, 'manage_roles') && db.profiles[socket.username]?.rank !== 'Admin') {
+            if (typeof callback === 'function') callback({ success: false });
+            return;
         }
+        if (typeof callback === 'function') callback({ success: true, roles: db.roles, profiles: db.profiles });
     });
 
     socket.on('create_role', (data, callback) => {
+        if (!hasPermission(socket.username, 'manage_roles') && db.profiles[socket.username]?.rank !== 'Admin') return;
         const { roleName, permissions } = data;
         if (!roleName) return;
+
         db.roles[roleName] = { permissions: permissions || [] };
         saveDatabase();
         if (typeof callback === 'function') callback({ success: true });
     });
 
     socket.on('assign_role', (data, callback) => {
+        if (!hasPermission(socket.username, 'manage_roles') && db.profiles[socket.username]?.rank !== 'Admin') return;
         const { targetUser, newRole } = data;
-        if (db.profiles[targetUser]) {
-            db.profiles[targetUser].rank = newRole;
-            saveDatabase();
-            for (let [id, s] of io.sockets.sockets) {
-                if (s.username === targetUser) {
-                    s.emit('role_updated', { role: newRole });
-                    break;
-                }
+        if (!db.profiles[targetUser] || !db.roles[newRole]) return;
+
+        db.profiles[targetUser].rank = newRole;
+        saveDatabase();
+
+        for (let [id, s] of io.sockets.sockets) {
+            if (s.username === targetUser) {
+                s.emit('role_updated', { role: newRole });
+                break;
             }
-            io.emit('update_online_users', getOnlineUsersList());
         }
+        broadcastOnlineUsers();
         if (typeof callback === 'function') callback({ success: true });
     });
 
     socket.on('admin_kick', (data, callback) => {
         const { targetUser } = data;
+        if (!hasPermission(socket.username, 'kick')) {
+            if (typeof callback === 'function') callback({ success: false, message: 'Keine Berechtigung zum Kicken.' });
+            return;
+        }
+
         for (let [id, s] of io.sockets.sockets) {
             if (s.username === targetUser) {
-                s.emit('kicked_notification', { message: 'Du wurdest von einem Admin getrennt.' });
+                s.emit('direct_call_ended'); 
                 s.disconnect(true);
                 break;
             }
         }
-        if (typeof callback === 'function') callback({ success: true, message: `${targetUser} wurde gekickt.` });
+        if (typeof callback === 'function') callback({ success: true, message: `${targetUser} wurde aus dem Kanal gekickt.` });
     });
 
     socket.on('admin_ban', (data, callback) => {
         const { targetUser, reason } = data;
-        if (!db.bannedUsers) db.bannedUsers = [];
-        if (!db.bannedUsers.includes(targetUser)) {
-            db.bannedUsers.push(targetUser);
-            saveDatabase();
+        if (!hasPermission(socket.username, 'ban')) {
+            if (typeof callback === 'function') callback({ success: false, message: 'Keine Berechtigung zum Bannen.' });
+            return;
         }
+
+        delete db.profiles[targetUser];
+        saveDatabase();
+
         for (let [id, s] of io.sockets.sockets) {
             if (s.username === targetUser) {
                 s.emit('banned_notification', { reason: reason || 'Kein Grund angegeben' });
@@ -348,32 +364,28 @@ io.on('connection', (socket) => {
                 break;
             }
         }
-        if (typeof callback === 'function') callback({ success: true, message: `${targetUser} wurde gebannt.` });
+        broadcastOnlineUsers();
+        if (typeof callback === 'function') callback({ success: true, message: `${targetUser} wurde gebannt. Grund: ${reason || 'Keiner'}` });
     });
 
-    socket.on('delete_message', (data, callback) => {
+    socket.on('delete_message', (data) => {
         const { messageId } = data;
-        const index = chatMessages.findIndex(m => m.id === messageId);
-        if (index !== -1) {
-            chatMessages.splice(index, 1);
-            saveMessages();
-            io.emit('message_deleted', { messageId });
-            if (typeof callback === 'function') callback({ success: true });
-        } else {
-            if (typeof callback === 'function') callback({ success: false, message: 'Nachricht nicht gefunden.' });
-        }
+        if (!hasPermission(socket.username, 'delete_messages')) return;
+
+        chatMessages = chatMessages.filter(m => m.id !== messageId);
+        saveMessages();
+        io.emit('message_deleted', { messageId });
     });
 
-    socket.on('mark_message', (data, callback) => {
-        const { messageId, marked } = data;
+    socket.on('toggle_mark_message', (data) => {
+        const { messageId } = data;
+        if (!hasPermission(socket.username, 'mark_messages')) return;
+
         const msg = chatMessages.find(m => m.id === messageId);
         if (msg) {
-            msg.marked = marked;
+            msg.marked = !msg.marked;
             saveMessages();
-            io.emit('message_marked', { messageId, marked });
-            if (typeof callback === 'function') callback({ success: true });
-        } else {
-            if (typeof callback === 'function') callback({ success: false, message: 'Nachricht nicht gefunden.' });
+            io.emit('message_marked', { messageId, marked: msg.marked });
         }
     });
 
@@ -382,17 +394,21 @@ io.on('connection', (socket) => {
         const sender = socket.username;
         if (!sender || !recipient || !text) return;
 
-        const pm = {
-            id: `pm_${Date.now()}_${Math.random()}`,
+        const pmObj = {
+            id: 'pm_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
             sender: sender,
             recipient: recipient,
             text: text,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+            timestamp: getFormattedTime()
         };
+
+        privateMessages.push(pmObj);
+        if (privateMessages.length > 500) privateMessages.shift();
+        savePrivateMessages();
 
         for (let [id, s] of io.sockets.sockets) {
             if (s.username === recipient || s.username === sender) {
-                s.emit('private_message', pm);
+                s.emit('private_message', pmObj);
             }
         }
     });
@@ -414,6 +430,7 @@ io.on('connection', (socket) => {
         }
 
         socket.join(channelName);
+
         io.to(channelName).emit('update_voice_channel_users', {
             channelName: channelName,
             users: getVoiceChannelUsers(channelName)
@@ -492,7 +509,7 @@ io.on('connection', (socket) => {
                 }
             });
         }
-        io.emit('update_online_users', getOnlineUsersList());
+        broadcastOnlineUsers();
     });
 
     socket.on('set_audio_settings', (data, callback) => {
@@ -536,13 +553,14 @@ io.on('connection', (socket) => {
         });
 
         const chatMsg = {
-            id: `msg_${Date.now()}_${Math.random()}`,
+            id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
             channel: channel,
             user: username,
+            message: text,
             text: text,
+            marked: false,
             avatar: db.profiles[username]?.avatar || '/default-avatar.png',
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
-            marked: false
+            timestamp: getFormattedTime()
         };
 
         chatMessages.push(chatMsg);
@@ -603,13 +621,14 @@ io.on('connection', (socket) => {
             }
 
             const chatMsg = {
-                id: `msg_${Date.now()}_${Math.random()}`,
+                id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
                 channel: channel,
                 user: username,
+                message: messageHTML,
                 text: messageHTML,
+                marked: false,
                 avatar: db.profiles[username]?.avatar || '/default-avatar.png',
-                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
-                marked: false
+                timestamp: getFormattedTime()
             };
 
             chatMessages.push(chatMsg);
@@ -721,6 +740,27 @@ app.get('/api/view-db', (req, res) => {
         res.send(data);
     } else {
         res.status(404).json({ success: false, message: 'Keine database.json gefunden.' });
+    }
+});
+
+app.get('/api/view-messages', (req, res) => {
+    if (fs.existsSync(messagesFile)) {
+        const data = fs.readFileSync(messagesFile, 'utf8');
+        res.setHeader('Content-Type', 'application/json');
+        res.send(data);
+    } else {
+        res.status(404).json({ success: false, message: 'Keine messages.json gefunden.' });
+    }
+});
+
+// API-Endpunkt für die Ansicht der gespeicherten Privatnachrichten im Browser
+app.get('/api/view-private-messages', (req, res) => {
+    if (fs.existsSync(privateMessagesFile)) {
+        const data = fs.readFileSync(privateMessagesFile, 'utf8');
+        res.setHeader('Content-Type', 'application/json');
+        res.send(data);
+    } else {
+        res.status(404).json({ success: false, message: 'Keine privatemessage.json gefunden.' });
     }
 });
 
