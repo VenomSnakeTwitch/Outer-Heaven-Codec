@@ -1,202 +1,254 @@
-// --- Globale Variablen & Initialisierung ---
 const socket = io();
 let currentUser = null;
 let currentChannel = 'allgemein';
 let currentVoiceChannel = null;
 let localStream = null;
 let peerConnections = {};
-let remoteStreams = {};
+let activePrivateChatUser = null;
+let privateMessagesStore = {};
+let allLoadedMessages = [];
+let channelsData = { text: ['allgemein', 'gta-online'], voice: ['Lobby'] };
 
-// Standard-ICE-Server für WebRTC (STUN)
 const rtcConfig = {
-    iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
-    ]
+    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
 };
 
 // --- Authentifizierung ---
 let isRegisterMode = false;
-
 function toggleAuthMode() {
     isRegisterMode = !isRegisterMode;
-    const title = document.getElementById('auth-title');
-    const btn = document.getElementById('auth-submit-btn');
-    const switchBtn = document.getElementById('switch-mode-btn');
-    const adminSecretInput = document.getElementById('admin-secret-input');
-
-    if (isRegisterMode) {
-        title.innerText = 'Outer Heaven - Registrierung';
-        btn.innerText = 'Registrieren';
-        switchBtn.innerText = 'Bereits ein Konto? Einloggen';
-        if (adminSecretInput) adminSecretInput.style.display = 'block';
-    } else {
-        title.innerText = 'Outer Heaven - Login';
-        btn.innerText = 'Einloggen';
-        switchBtn.innerText = 'Noch kein Konto? Registrieren';
-        if (adminSecretInput) adminSecretInput.style.display = 'none';
-    }
+    document.getElementById('auth-title').innerText = isRegisterMode ? 'Outer Heaven - Registrierung' : 'Outer Heaven - Login';
+    document.getElementById('auth-submit-btn').innerText = isRegisterMode ? 'Registrieren' : 'Einloggen';
+    document.getElementById('switch-mode-btn').innerText = isRegisterMode ? 'Bereits ein Konto? Einloggen' : 'Noch kein Konto? Registrieren';
+    document.getElementById('admin-secret-input').style.display = isRegisterMode ? 'block' : 'none';
 }
 
 function handleAuth() {
-    const usernameInput = document.getElementById('username').value.trim();
-    const passwordInput = document.getElementById('passwort').value;
-    const adminSecretInput = document.getElementById('admin-secret-input');
-    const adminSecret = adminSecretInput ? adminSecretInput.value.trim() : '';
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('passwort').value;
+    const adminSecret = document.getElementById('admin-secret-input').value.trim();
 
-    if (!usernameInput || !passwordInput) {
-        alert('Bitte Benutzername und Passwort eingeben.');
-        return;
-    }
+    if (!username || !password) return alert('Bitte Benutzername und Passwort eingeben.');
 
-    const eventName = isRegisterMode ? 'register' : 'login';
-    const payload = isRegisterMode 
-        ? { username: usernameInput, password: passwordInput, adminSecret }
-        : { username: usernameInput, password: passwordInput };
-
-    socket.emit(eventName, payload, (response) => {
-        if (response.success) {
-            currentUser = response.user;
+    const endpoint = isRegisterMode ? '/api/register' : '/api/login';
+    fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password, adminSecret })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            currentUser = {
+                username: data.username || username,
+                role: data.role || data.rank || 'Agent',
+                avatar: data.avatar || '/default-avatar.png',
+                bio: data.bio || ''
+            };
             document.getElementById('auth-screen').style.display = 'none';
             document.getElementById('user-name-disp').innerText = currentUser.username;
-            
             updateUserAvatarDisplay();
-            
+
             if (currentUser.role === 'Admin' || currentUser.role === 'Mod') {
-                const adminBtn = document.getElementById('admin-menu-btn');
-                if (adminBtn) adminBtn.style.display = 'block';
+                document.getElementById('admin-menu-btn').style.display = 'block';
             }
 
-            socket.emit('get_history', { channel: currentChannel });
-            loadChannels();
+            socket.emit('set_user_info', currentUser);
+            loadFriendsAndRequests();
         } else {
-            alert(response.message || 'Authentifizierungsfehler');
+            alert(data.message || 'Fehler');
         }
     });
 }
 
 function logout() {
-    currentUser = null;
-    if (localStream) {
-        localStream.getTracks().forEach(track => track.stop());
-    }
     location.reload();
 }
 
 function updateUserAvatarDisplay() {
     const disp = document.getElementById('user-avatar-disp');
     if (!disp) return;
-    const avatarUrl = (currentUser && currentUser.avatar) ? currentUser.avatar : 'https://via.placeholder.com/40';
-    let frameStyle = '';
-    if (currentUser && currentUser.frame === 'gold') {
-        frameStyle = 'border: 2px solid #f1c40f;';
-    } else if (currentUser && currentUser.frame === 'codec') {
-        frameStyle = 'border: 2px solid #2ecc71;';
-    }
-    disp.innerHTML = `<img src="${avatarUrl}" alt="Avatar" style="width: 36px; height: 36px; border-radius: 50%; object-fit: cover; ${frameStyle}">`;
+    disp.innerHTML = `<img src="${currentUser.avatar || '/default-avatar.png'}" alt="Avatar" style="width:36px; height:36px; border-radius:50%; object-fit:cover;">`;
 }
 
-// --- Chat & Nachrichten Rendering ---
-window.allLoadedMessages = [];
+// --- Initialisierung & Events ---
+socket.on('init state', (data) => {
+    if (data.channels) {
+        channelsData = data.channels;
+        renderChannels();
+    }
+});
 
-socket.on('history', (messages) => {
-    window.allLoadedMessages = messages;
+socket.on('load_history', (messages) => {
+    allLoadedMessages = messages;
     renderMessagesForCurrentChannel();
 });
+
+socket.on('chat message', (msg) => {
+    if (!allLoadedMessages.some(m => m.id === msg.id)) {
+        allLoadedMessages.push(msg);
+    }
+    renderMessagesForCurrentChannel();
+});
+
+socket.on('load_private_history', (messages) => {
+    messages.forEach(msg => {
+        const partner = msg.sender === currentUser?.username ? msg.recipient : msg.sender;
+        if (!privateMessagesStore[partner]) privateMessagesStore[partner] = [];
+        if (!privateMessagesStore[partner].some(m => m.id === msg.id)) {
+            privateMessagesStore[partner].push(msg);
+        }
+    });
+});
+
+socket.on('private_message', (msg) => {
+    const partner = msg.sender === currentUser?.username ? msg.recipient : msg.sender;
+    if (!privateMessagesStore[partner]) privateMessagesStore[partner] = [];
+    privateMessagesStore[partner].push(msg);
+    if (activePrivateChatUser === partner) renderPrivateMessages();
+});
+
+socket.on('update_online_users', (users) => {
+    const list = document.getElementById('online-users-list');
+    if (!list) return;
+    list.innerHTML = users.length ? '' : '<div style="color: #888; font-size: 11px;">Keine Benutzer online.</div>';
+    users.forEach(u => {
+        list.innerHTML += `
+            <div onclick="openUserProfile('${u.username}')" style="display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; font-size: 12px;">
+                <div style="width: 8px; height: 8px; background: #2ecc71; border-radius: 50%;"></div>
+                <span style="color: #fff; flex: 1;">${u.username}</span>
+                <span style="font-size: 9px; background: #5865f2; color: #fff; padding: 1px 4px; border-radius: 3px;">${u.role}</span>
+            </div>`;
+    });
+});
+
+// --- Channels & Messaging ---
+function renderChannels() {
+    const textContainer = document.getElementById('text-channels');
+    const voiceContainer = document.getElementById('voice-channels');
+    if (!textContainer || !voiceContainer) return;
+
+    textContainer.innerHTML = '';
+    (channelsData.text || []).forEach(ch => {
+        textContainer.innerHTML += `<div class="channel-item ${currentChannel === ch ? 'active' : ''}" onclick="switchChannel('text', '${ch}')"># ${ch}</div>`;
+    });
+
+    voiceContainer.innerHTML = '';
+    (channelsData.voice || []).forEach(ch => {
+        voiceContainer.innerHTML += `<div class="channel-item" onclick="joinVoiceChannel('${ch}')">🔊 ${ch}</div>`;
+    });
+}
+
+function switchChannel(type, name) {
+    if (type === 'text') {
+        currentChannel = name;
+        document.getElementById('current-channel-title').innerText = `# ${name}`;
+        document.getElementById('chat-messages').style.display = 'flex';
+        document.getElementById('video-grid').style.display = 'none';
+        document.getElementById('chat-input-area-box').style.display = 'flex';
+        document.getElementById('leave-voice-btn').style.display = 'none';
+        renderChannels();
+        renderMessagesForCurrentChannel();
+    }
+}
 
 function renderMessagesForCurrentChannel() {
     const container = document.getElementById('chat-messages');
     if (!container) return;
     container.innerHTML = '';
 
-    const channelMsgs = window.allLoadedMessages.filter(m => (m.channel || 'allgemein') === currentChannel);
-
+    const channelMsgs = allLoadedMessages.filter(m => (m.channel || 'allgemein') === currentChannel);
     if (channelMsgs.length === 0) {
-        container.innerHTML = '<div style="color: #888; text-align: center; margin-top: 20px; font-size: 12px;">Keine Nachrichten in diesem Kanal. Starte die Konversation!</div>';
+        container.innerHTML = '<div style="color: #888; text-align: center; margin-top: 20px; font-size: 12px;">Keine Nachrichten in diesem Kanal.</div>';
         return;
     }
 
     channelMsgs.forEach(m => {
-        let contentHtml = '';
-        if (m.type === 'image') {
-            contentHtml = `<img src="${m.fileData}" style="max-width: 250px; max-height: 250px; border-radius: 6px; margin-top: 5px; display: block; cursor: pointer;" onclick="window.open('${m.fileData}')">`;
-        } else if (m.type === 'audio') {
-            contentHtml = `<audio controls src="${m.fileData}" style="margin-top: 5px; max-width: 100%; height: 32px;"></audio>`;
-        } else if (m.type === 'audiofile') {
-            contentHtml = `<div style="margin-top: 5px;"><a href="${m.fileData}" download="${m.fileName || 'audio.mp3'}" style="color: #2ecc71; text-decoration: underline;">🎵 ${m.fileName || 'Audiodatei herunterladen'}</a><audio controls src="${m.fileData}" style="display:block; margin-top:5px; max-width: 100%; height: 28px;"></audio></div>`;
-        } else if (m.type === 'video') {
-            contentHtml = `<video controls src="${m.fileData}" style="max-width: 300px; max-height: 200px; border-radius: 6px; margin-top: 5px; display: block;"></video>`;
-        } else {
-            contentHtml = `<div style="color: #dcddde; word-break: break-word; margin-top: 2px;">${escapeHtml(m.message || '')}</div>`;
-        }
-
-        const isMarked = m.marked ? 'border-left: 4px solid #f1c40f; background: rgba(241,196,15,0.05);' : '';
-        const userAdminOrMod = currentUser && (currentUser.role === 'Admin' || currentUser.role === 'Mod');
-
-        let adminControls = '';
-        if (userAdminOrMod) {
-            adminControls = `
-                <div style="margin-left: auto; display: flex; gap: 5px; opacity: 0.7;">
-                    <button onclick="toggleMarkMessage('${m.id}')" style="background: none; border: none; cursor: pointer; font-size: 11px;" title="Wichtig markieren">⭐</button>
-                    <button onclick="deleteMessage('${m.id}')" style="background: none; border: none; cursor: pointer; font-size: 11px;" title="Löschen">🗑️</button>
-                </div>
-            `;
-        }
-
         container.innerHTML += `
-            <div style="display: flex; gap: 10px; margin-bottom: 12px; padding: 4px 8px; border-radius: 4px; ${isMarked}">
-                <div style="flex: 1;">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span onclick="openUserProfile('${m.username}')" style="color: #2ecc71; font-weight: bold; cursor: pointer; font-size: 13px;" title="Profil ansehen">${escapeHtml(m.username)}</span>
-                        <span style="font-size: 10px; color: #72767d;">${m.timestamp || ''}</span>
-                        ${adminControls}
-                    </div>
-                    ${contentHtml}
+            <div style="display: flex; flex-direction: column; margin-bottom: 10px;">
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <span onclick="openUserProfile('${m.user}')" style="color: #2ecc71; font-weight: bold; cursor: pointer; font-size: 13px;">${m.user}</span>
+                    <span style="font-size: 10px; color: #72767d;">${m.timestamp || ''}</span>
                 </div>
-            </div>
-        `;
+                <div style="font-size: 14px; color: #dcddde; margin-top: 2px;">${m.message || m.text}</div>
+            </div>`;
     });
-
     container.scrollTop = container.scrollHeight;
 }
 
-function escapeHtml(text) {
-    if (!text) return '';
-    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+function sendMessage() {
+    const input = document.getElementById('msg-input');
+    if (!input || !input.value.trim()) return;
+    socket.emit('chat message', { channel: currentChannel, text: input.value.trim() });
+    input.value = '';
 }
 
-function deleteMessage(messageId) {
-    socket.emit('delete_message', { messageId });
+function checkSend(event) {
+    if (event.key === 'Enter') sendMessage();
 }
 
-function toggleMarkMessage(messageId) {
-    socket.emit('toggle_mark_message', { messageId });
+// --- Private Chats & Profil ---
+function openPrivateChat(username) {
+    if (username === currentUser?.username) return;
+    activePrivateChatUser = username;
+    document.getElementById('private-chat-title').innerText = `Direktnachricht: ${username}`;
+    document.getElementById('private-chat-container').style.display = 'flex';
+    renderPrivateMessages();
 }
 
-// --- Online-Benutzer & Sprachkanäle (WebRTC) ---
-socket.on('update_online_users', (users) => {
-    const list = document.getElementById('online-users-list');
-    if (!list) return;
-    list.innerHTML = '';
+function closePrivateChat() {
+    document.getElementById('private-chat-container').style.display = 'none';
+    activePrivateChatUser = null;
+}
 
-    if (!users || users.length === 0) {
-        list.innerHTML = '<div style="color: #888; font-size: 11px;">Keine Benutzer online.</div>';
-        return;
-    }
+function sendPrivateMessage() {
+    const input = document.getElementById('private-msg-input');
+    if (!input || !input.value.trim() || !activePrivateChatUser) return;
+    socket.emit('private_message', { recipient: activePrivateChatUser, text: input.value.trim() });
+    input.value = '';
+}
 
-    users.forEach(u => {
-        const roleColor = u.role === 'Admin' ? '#e67e22' : (u.role === 'Mod' ? '#3498db' : '#2ecc71');
-        list.innerHTML += `
-            <div onclick="openUserProfile('${u.username}')" style="display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; font-size: 12px;" title="Profil anzeigen">
-                <div style="width: 8px; height: 8px; background: #2ecc71; border-radius: 50%;"></div>
-                <span style="color: #fff; flex: 1;">${escapeHtml(u.username)}</span>
-                <span style="font-size: 9px; background: ${roleColor}; color: #fff; padding: 1px 4px; border-radius: 3px;">${u.role}</span>
-            </div>
-        `;
+function checkSendPrivate(event) {
+    if (event.key === 'Enter') sendPrivateMessage();
+}
+
+function renderPrivateMessages() {
+    const container = document.getElementById('private-chat-messages');
+    if (!container || !activePrivateChatUser) return;
+    container.innerHTML = '';
+    (privateMessagesStore[activePrivateChatUser] || []).forEach(m => {
+        const isMe = m.sender === currentUser?.username;
+        container.innerHTML += `
+            <div style="background: ${isMe ? '#2f3136' : '#40444b'}; padding: 6px 10px; border-radius: 6px; align-self: ${isMe ? 'flex-end' : 'flex-start'}; max-width: 85%;">
+                <div style="font-size: 10px; color: #b9bbbe;"><b>${m.sender}</b> - ${m.timestamp}</div>
+                <div style="color: #fff;">${m.text}</div>
+            </div>`;
     });
-});
+    container.scrollTop = container.scrollHeight;
+}
 
-window.joinVoiceChannel = function(channelName) {
+function openUserProfile(username) {
+    socket.emit('get_user_profile', username, (profile) => {
+        document.getElementById('modal-username').innerText = profile.username || username;
+        document.getElementById('modal-avatar').src = profile.avatar || '/default-avatar.png';
+        document.getElementById('modal-rank').innerText = profile.rank || 'Agent';
+        document.getElementById('modal-bio-text').innerText = profile.bio || 'Keine Bio.';
+        document.getElementById('user-profile-modal').style.display = 'flex';
+    });
+}
+
+function closeProfileModal() {
+    document.getElementById('user-profile-modal').style.display = 'none';
+}
+
+function openPrivateChatFromProfile() {
+    const username = document.getElementById('modal-username').innerText;
+    closeProfileModal();
+    openPrivateChat(username);
+}
+
+// --- Sprachkanäle & WebRTC ---
+function joinVoiceChannel(channelName) {
     currentVoiceChannel = channelName;
     document.getElementById('chat-messages').style.display = 'none';
     document.getElementById('video-grid').style.display = 'grid';
@@ -204,156 +256,141 @@ window.joinVoiceChannel = function(channelName) {
     document.getElementById('current-channel-title').innerText = `🔊 Sprachkanal: ${channelName}`;
     document.getElementById('leave-voice-btn').style.display = 'block';
 
-    const audioConstraint = (currentUser && currentUser.audioInputId)
-        ? { deviceId: { exact: currentUser.audioInputId } }
-        : true;
-
-    navigator.mediaDevices.getUserMedia({ audio: audioConstraint, video: true })
+    navigator.mediaDevices.getUserMedia({ audio: true, video: true })
         .then(stream => {
             localStream = stream;
             addVideoStream('local', stream, currentUser.username, true);
-            socket.emit('join_voice', { channel: channelName });
+            socket.emit('join_voice_channel', { channelName });
         })
-        .catch(err => {
-            console.error('Medienzugriff fehlgeschlagen:', err);
-            alert('Kamera/Mikrofon konnte nicht geöffnet werden.');
-        });
+        .catch(() => alert('Medienzugriff fehlgeschlagen.'));
 }
 
-window.leaveVoiceChannel = function() {
+function leaveVoiceChannel() {
     if (localStream) {
         localStream.getTracks().forEach(track => track.stop());
         localStream = null;
     }
-
     Object.values(peerConnections).forEach(pc => pc.close());
     peerConnections = {};
-    remoteStreams = {};
-
     document.getElementById('video-grid').innerHTML = '';
-    socket.emit('leave_voice');
-
+    socket.emit('leave_voice_channel');
     switchChannel('text', 'allgemein');
 }
 
 function addVideoStream(id, stream, username, isLocal = false) {
     const grid = document.getElementById('video-grid');
     if (!grid) return;
-
     let container = document.getElementById(`video-container-${id}`);
     if (!container) {
         container = document.createElement('div');
+        container.className = 'video-card';
         container.id = `video-container-${id}`;
-        container.style.cssText = 'position: relative; background: #202225; border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; min-height: 200px;';
         
         const video = document.createElement('video');
-        video.id = `video-${id}`;
         video.autoplay = true;
         video.playsInline = true;
         if (isLocal) video.muted = true;
-        video.style.cssText = 'width: 100%; height: 100%; object-fit: cover;';
         video.srcObject = stream;
 
         const label = document.createElement('div');
-        label.style.cssText = 'position: absolute; bottom: 8px; left: 8px; background: rgba(0,0,0,0.6); color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 11px;';
+        label.className = 'peer-name';
         label.innerText = username;
 
         container.appendChild(video);
         container.appendChild(label);
         grid.appendChild(container);
-    } else {
-        const video = document.getElementById(`video-${id}`);
-        if (video) video.srcObject = stream;
     }
 }
 
-// WebRTC Signaling Events
-socket.on('voice_peers', async (peers) => {
-    for (const peerId of peers) {
-        const pc = createPeerConnection(peerId);
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        socket.emit('webrtc_offer', { target: peerId, offer });
-    }
-});
-
-socket.on('webrtc_offer', async (data) => {
-    const pc = createPeerConnection(data.sender);
-    await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    socket.emit('webrtc_answer', { target: data.sender, answer });
-});
-
-socket.on('webrtc_answer', async (data) => {
-    const pc = peerConnections[data.sender];
-    if (pc) {
-        await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-    }
-});
-
-socket.on('webrtc_ice', async (data) => {
-    const pc = peerConnections[data.sender];
-    if (pc && data.candidate) {
-        await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-    }
-});
-
-socket.on('peer_left', (data) => {
-    if (peerConnections[data.peerId]) {
-        peerConnections[data.peerId].close();
-        delete peerConnections[data.peerId];
-    }
-    const container = document.getElementById(`video-container-${data.peerId}`);
-    if (container) container.remove();
-});
-
-function createPeerConnection(peerId) {
-    const pc = new RTCPeerConnection(rtcConfig);
-    peerConnections[peerId] = pc;
-
-    if (localStream) {
-        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-    }
-
-    pc.onicecandidate = (event) => {
-        if (event.candidate) {
-            socket.emit('webrtc_ice', { target: peerId, candidate: event.candidate });
-        }
-    };
-
-    pc.ontrack = (event) => {
-        remoteStreams[peerId] = event.streams[0];
-        addVideoStream(peerId, event.streams[0], `Agent (${peerId.substring(0,4)})`);
-    };
-
-    return pc;
-}
-
-// Mikrofon-Test
-window.testMicrophone = function() {
-    const statusSpan = document.getElementById('mic-test-status');
-    const micSelect = document.getElementById('audio-input-select');
-    const deviceId = micSelect ? micSelect.value : undefined;
-
-    const constraints = deviceId ? { audio: { deviceId: { exact: deviceId } } } : { audio: true };
-
-    navigator.mediaDevices.getUserMedia(constraints)
-        .then(stream => {
-            statusSpan.style.color = '#2ecc71';
-            statusSpan.innerText = 'Mikrofon funktioniert! Audio wird erkannt.';
-            setTimeout(() => {
-                stream.getTracks().forEach(track => track.stop());
-                statusSpan.innerText = '';
-            }, 3000);
-        })
-        .catch(err => {
-            statusSpan.style.color = '#ed4245';
-            statusSpan.innerText = 'Fehler: Mikrofon konnte nicht getestet werden.';
-            console.error(err);
+// --- Freunde & Anfragen ---
+function loadFriendsAndRequests() {
+    if (!currentUser) return;
+    socket.emit('get_friends', currentUser.username, (friends) => {
+        const container = document.getElementById('friends-list');
+        if (!container) return;
+        container.innerHTML = friends.length ? '' : '<div style="color: #888; font-size: 11px;">Keine Freunde.</div>';
+        friends.forEach(f => {
+            container.innerHTML += `
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 12px; background: rgba(255,255,255,0.05); padding: 3px 6px; border-radius: 3px;">
+                    <span onclick="openUserProfile('${f}')" style="color: #2ecc71; cursor: pointer;">${f}</span>
+                    <button onclick="openPrivateChat('${f}')" style="background: #5865f2; color: white; border: none; border-radius: 3px; cursor: pointer; padding: 1px 5px; font-size: 10px;">💬</button>
+                </div>`;
         });
+    });
+
+    socket.emit('get_friend_requests', currentUser.username, (requests) => {
+        const container = document.getElementById('friend-requests-list');
+        if (!container) return;
+        container.innerHTML = requests.length ? '' : '<div style="color: #888; font-size: 11px;">Keine Anfragen.</div>';
+        requests.forEach(sender => {
+            container.innerHTML += `
+                <div style="margin-bottom: 4px; font-size: 11px; background: rgba(241,196,15,0.1); padding: 4px; border-radius: 3px;">
+                    <b>${sender}</b>
+                    <button onclick="respondRequest('${sender}', true)" style="background: #2ecc71; color: white; border: none; padding: 2px; font-size: 9px;">Annehmen</button>
+                </div>`;
+        });
+    });
 }
 
-window.startDirectCall = function(friendName) {
-    alert(`Direktanruf zu ${friendName} wird vorbereitet... (Nutze die Sprachkanäle für vollwertige Audio/Video-Calls).`);
+function respondRequest(senderName, accept) {
+    socket.emit('respond_friend_request', { username: currentUser.username, senderName, accept }, () => loadFriendsAndRequests());
+}
+
+function addFriendInput() {
+    const input = document.getElementById('add-friend-input');
+    if (!input || !input.value.trim()) return;
+    socket.emit('send_friend_request', { username: currentUser.username, targetName: input.value.trim() }, (res) => {
+        alert(res.message);
+        if (res.success) { input.value = ''; loadFriendsAndRequests(); }
+    });
+}
+
+// --- Uploads & Medien ---
+function handleGeneralUpload(input) {
+    if (!input.files || !input.files[0]) return;
+    const file = input.files[0];
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        let type = 'image';
+        if (file.type.startsWith('audio/')) type = 'audiofile';
+        else if (file.type.startsWith('video/')) type = 'video';
+
+        socket.emit('chat_media', {
+            channel: currentChannel,
+            username: currentUser.username,
+            type: type,
+            fileData: e.target.result,
+            fileName: file.name
+        });
+    };
+    reader.readAsDataURL(file);
+    input.value = '';
+}
+
+// --- Einstellungen & Admin ---
+function openSettings() { document.getElementById('settings-modal').style.display = 'flex'; }
+function closeSettings() { document.getElementById('settings-modal').style.display = 'none'; }
+function openAdminMenu() { document.getElementById('admin-menu-modal').style.display = 'flex'; }
+function closeAdminMenu() { document.getElementById('admin-menu-modal').style.display = 'none'; }
+function openCreateChannelModal(type) { document.getElementById('create-channel-modal').style.display = 'flex'; window.creatingType = type; }
+function closeCreateChannelModal() { document.getElementById('create-channel-modal').style.display = 'none'; }
+
+function submitCreateChannel() {
+    const nameInput = document.getElementById('new-channel-name-input');
+    if (!nameInput || !nameInput.value.trim()) return;
+    socket.emit('create_channel', { type: window.creatingType || 'text', name: nameInput.value.trim().toLowerCase() }, (res) => {
+        if (res.success) closeCreateChannelModal();
+        else alert(res.message);
+    });
+}
+
+function testMicrophone() {
+    const status = document.getElementById('mic-test-status');
+    navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(stream => {
+            status.style.color = '#2ecc71';
+            status.innerText = 'Mikrofon funktioniert!';
+            setTimeout(() => { stream.getTracks().forEach(t => t.stop()); status.innerText = ''; }, 3000);
+        })
+        .catch(() => { status.style.color = '#ed4245;'; status.innerText = 'Fehler beim Zugriff.'; });
 }
