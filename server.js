@@ -80,7 +80,7 @@ if (fs.existsSync(messagesFile)) {
             user: m.user || 'Unbekannt',
             text: m.text || '',
             avatar: m.avatar || '/default-avatar.png',
-            timestamp: m.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            timestamp: m.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
             marked: !!m.marked
         }));
     } catch (err) {
@@ -145,12 +145,32 @@ function getVoiceChannelUsers(channelName) {
     return users;
 }
 
+// Hilfsfunktion zum Abrufen aller aktuell verbundenen Online-Nutzer für die rechte Sidebar
+function getOnlineUsersList() {
+    const usersMap = new Map();
+    for (let [id, s] of io.sockets.sockets) {
+        if (s.username) {
+            usersMap.set(s.username, {
+                username: s.username,
+                rank: db.profiles[s.username]?.rank || 'Agent',
+                avatar: db.profiles[s.username]?.avatar || '/default-avatar.png',
+                bio: db.profiles[s.username]?.bio || ''
+            });
+        }
+    }
+    return Array.from(usersMap.values());
+}
+
 io.on('connection', (socket) => {
     socket.emit('init state', {
         channels: db.channels,
-        messages: chatMessages
+        messages: chatMessages,
+        users: getOnlineUsersList()
     });
     socket.emit('load_history', chatMessages);
+
+    // Sende aktualisierte Online-Liste an alle Clients
+    io.emit('update_online_users', getOnlineUsersList());
 
     // --- Socket.io Registrierung ---
     socket.on('register', (data, callback) => {
@@ -207,6 +227,7 @@ io.on('connection', (socket) => {
         }
 
         socket.username = user.username;
+        io.emit('update_online_users', getOnlineUsersList());
 
         if (typeof callback === 'function') {
             callback({ 
@@ -231,10 +252,24 @@ io.on('connection', (socket) => {
             ...data
         };
         saveDatabase();
+        io.emit('update_online_users', getOnlineUsersList());
     });
 
     socket.on('get_channels', (callback) => {
         if (typeof callback === 'function') callback(db.channels);
+    });
+
+    // Event für die rechte Nutzerliste / Admin-Abfragen
+    socket.on('get_online_users', (callback) => {
+        const users = getOnlineUsersList();
+        if (typeof callback === 'function') callback(users);
+        socket.emit('update_online_users', users);
+    });
+
+    socket.on('get_all_profiles', (callback) => {
+        if (typeof callback === 'function') {
+            callback({ success: true, profiles: db.profiles });
+        }
     });
 
     socket.on('create_channel', (data, callback) => {
@@ -253,7 +288,7 @@ io.on('connection', (socket) => {
         db.channels[type].push(name);
         saveDatabase();
 
-        io.emit('init state', { channels: db.channels, messages: chatMessages });
+        io.emit('init state', { channels: db.channels, messages: chatMessages, users: getOnlineUsersList() });
         if (typeof callback === 'function') callback({ success: true });
     });
 
@@ -282,6 +317,7 @@ io.on('connection', (socket) => {
                     break;
                 }
             }
+            io.emit('update_online_users', getOnlineUsersList());
         }
         if (typeof callback === 'function') callback({ success: true });
     });
@@ -351,7 +387,7 @@ io.on('connection', (socket) => {
             sender: sender,
             recipient: recipient,
             text: text,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
         };
 
         for (let [id, s] of io.sockets.sockets) {
@@ -456,6 +492,7 @@ io.on('connection', (socket) => {
                 }
             });
         }
+        io.emit('update_online_users', getOnlineUsersList());
     });
 
     socket.on('set_audio_settings', (data, callback) => {
@@ -504,7 +541,7 @@ io.on('connection', (socket) => {
             user: username,
             text: text,
             avatar: db.profiles[username]?.avatar || '/default-avatar.png',
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
             marked: false
         };
 
@@ -571,7 +608,7 @@ io.on('connection', (socket) => {
                 user: username,
                 text: messageHTML,
                 avatar: db.profiles[username]?.avatar || '/default-avatar.png',
-                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
                 marked: false
             };
 
