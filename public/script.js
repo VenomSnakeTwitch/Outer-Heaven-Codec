@@ -1,519 +1,770 @@
-const socket = io();
-let currentUser = null;
-let currentChannel = 'allgemein';
-let currentVoiceChannel = null;
-let activeCallTarget = null;
-let isRegistering = false;
-let globalChannelsData = { text: ['allgemein', 'gta-online'], voice: ['Lobby'] };
+const express = require('express');
+const httpModule = require('http');
+const { Server } = require('socket.io');
+const path = require('path');
+const fs = require('fs');
 
-let localStream = null;
-let audioContext = null;
-let processorNode = null;
-let sourceNode = null;
-let monitoringAudio = null;
+const app = express();
+const server = httpModule.createServer(app);
 
-window.addEventListener('DOMContentLoaded', () => {
-    const savedUser = localStorage.getItem('outer_heaven_user');
-    if (savedUser) {
-        currentUser = JSON.parse(savedUser);
-        initApp();
-    }
-    loadAudioDevices();
+const io = new Server(server, {
+    maxHttpBufferSize: 3e9
 });
 
-function toggleAuthMode() {
-    isRegistering = !isRegistering;
-    document.getElementById('auth-title').innerText = isRegistering ? 'Outer Heaven - Registrieren' : 'Outer Heaven - Login';
-    document.getElementById('auth-submit-btn').innerText = isRegistering ? 'Registrieren' : 'Einloggen';
-    document.getElementById('switch-mode-btn').innerText = isRegistering ? 'Bereits ein Konto? Einloggen' : 'Noch kein Konto? Registrieren';
-    
-    // Admin-Schlüssel Feld bei Registrierung anzeigen
-    document.getElementById('admin-secret-input').style.display = isRegistering ? 'block' : 'none';
+app.use(express.json({ limit: '3gb' }));
+app.use(express.urlencoded({ limit: '3gb', extended: true }));
+app.use(express.static(path.join(__dirname, 'public')));
+
+const uploadsDir = path.join(__dirname, 'public', 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-async function handleAuth() {
-    const username = document.getElementById('username').value.trim();
-    const password = document.getElementById('passwort').value.trim();
-    const adminSecret = document.getElementById('admin-secret-input').value.trim();
-    if(!username || !password) return alert('Bitte alle Felder ausfüllen!');
+// Hilfsfunktion für die echte deutsche Uhrzeit (24-Stunden-Format)
+function getFormattedTime() {
+    return new Intl.DateTimeFormat('de-DE', {
+        timeZone: 'Europe/Berlin',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+    }).format(new Date());
+}
 
-    const endpoint = isRegistering ? '/api/register' : '/api/login';
-    const payload = isRegistering ? { username, password, adminSecret } : { username, password };
+const dbFile = path.join(__dirname, 'database.json');
 
-    const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    });
-    const data = await res.json();
+let db = {
+    profiles: {},
+    friends: {},
+    requests: {},
+    channels: {
+        text: ['allgemein', 'gta-online'],
+        voice: ['Lobby']
+    },
+    roles: {
+        'Admin': { permissions: ['all'] },
+        'Mod': { permissions: ['kick', 'ban', 'delete_messages', 'mark_messages'] },
+        'Agent': { permissions: [] }
+    }
+};
 
-    if(data.success) {
-        if(isRegistering) {
-            alert(data.message || 'Registrierung erfolgreich! Bitte nun einloggen.');
-            toggleAuthMode();
-        } else {
-            currentUser = { 
-                username: data.username, 
-                role: data.role, 
-                avatar: data.avatar || '', 
-                frame: data.frame || 'none' 
+if (fs.existsSync(dbFile)) {
+    try {
+        const fileData = fs.readFileSync(dbFile, 'utf8');
+        db = JSON.parse(fileData);
+        if (!db.profiles) db.profiles = {};
+        if (!db.friends) db.friends = {};
+        if (!db.requests) db.requests = {};
+        if (!db.channels) db.channels = { text: ['allgemein', 'gta-online'], voice: ['Lobby'] };
+        if (!db.roles) {
+            db.roles = {
+                'Admin': { permissions: ['all'] },
+                'Mod': { permissions: ['kick', 'ban', 'delete_messages', 'mark_messages'] },
+                'Agent': { permissions: [] }
             };
-            localStorage.setItem('outer_heaven_user', JSON.stringify(currentUser));
-            initApp();
         }
-    } else {
-        alert(data.message || 'Fehler aufgetreten');
+    } catch (err) {
+        console.error('Fehler beim Laden der database.json:', err);
     }
 }
 
-function logout() {
-    localStorage.removeItem('outer_heaven_user');
-    location.reload();
-}
-
-function initApp() {
-    document.getElementById('auth-screen').style.display = 'none';
-    document.getElementById('user-name-disp').innerText = `${currentUser.username} (${currentUser.role || 'Agent'})`;
-    updateUserAvatarUI();
-    socket.emit('join chat', currentUser);
-    socket.emit('set_user_info', { username: currentUser.username });
-    
-    // Admin-Menü Button einblenden, falls der Nutzer Admin ist
-    if (currentUser.role === 'Admin' && document.getElementById('admin-menu-btn')) {
-        document.getElementById('admin-menu-btn').style.display = 'block';
-    }
-}
-
-function updateUserAvatarUI() {
-    const avatarContainer = document.getElementById('user-avatar-disp');
-    avatarContainer.className = `avatar-container ${currentUser.frame || 'none'}`;
-    if (currentUser.avatar) {
-        avatarContainer.innerHTML = `<img src="${currentUser.avatar}" alt="Avatar">`;
-    } else {
-        avatarContainer.innerText = currentUser.username.charAt(0).toUpperCase();
-    }
-}
-
-function openSettings() {
-    if(!currentUser) return;
-    document.getElementById('setting-avatar').value = currentUser.avatar || '';
-    document.getElementById('setting-frame').value = currentUser.frame || 'none';
-    document.getElementById('settings-modal').style.display = 'flex';
-    loadAudioDevices();
-}
-
-function closeSettings() {
-    document.getElementById('settings-modal').style.display = 'none';
-}
-
-function saveSettings() {
-    currentUser.avatar = document.getElementById('setting-avatar').value.trim();
-    currentUser.frame = document.getElementById('setting-frame').value;
-    localStorage.setItem('outer_heaven_user', JSON.stringify(currentUser));
-    updateUserAvatarUI();
-    closeSettings();
-    alert('Einstellungen erfolgreich gespeichert!');
-}
-
-async function loadAudioDevices() {
+function saveDatabase() {
     try {
-        await navigator.mediaDevices.getUserMedia({ audio: true });
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const micSelect = document.getElementById('audio-input-select');
-        const outputSelect = document.getElementById('audio-output-select');
-
-        if(micSelect) micSelect.innerHTML = '';
-        if(outputSelect) outputSelect.innerHTML = '';
-
-        devices.forEach(device => {
-            const option = document.createElement('option');
-            option.value = device.deviceId;
-            option.text = device.label || `${device.kind} - ${device.deviceId.substring(0,5)}`;
-            if (device.kind === 'audioinput' && micSelect) {
-                micSelect.appendChild(option);
-            } else if (device.kind === 'audiooutput' && outputSelect) {
-                outputSelect.appendChild(option);
-            }
-        });
-    } catch(e) {
-        console.error('Fehler beim Laden der Audiogeräte:', e);
+        fs.writeFileSync(dbFile, JSON.stringify(db, null, 2), 'utf8');
+    } catch (err) {
+        console.error('Fehler beim Speichern der database.json:', err);
     }
 }
 
-async function testMicrophone() {
-    const status = document.getElementById('mic-test-status');
+const messagesFile = path.join(__dirname, 'messages.json');
+let chatMessages = [];
+
+if (fs.existsSync(messagesFile)) {
     try {
-        const selectedMicId = document.getElementById('audio-input-select')?.value;
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-            audio: {
-                deviceId: selectedMicId ? { exact: selectedMicId } : undefined,
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true
-            }
-        });
-
-        status.innerText = 'Test läuft... Sprich ins Mikrofon!';
-        status.style.color = '#2ecc71';
-
-        const testAudio = document.createElement('audio');
-        testAudio.srcObject = stream;
-        testAudio.autoplay = true;
-
-        setTimeout(() => {
-            stream.getTracks().forEach(t => t.stop());
-            testAudio.remove();
-            status.innerText = 'Mikrofon funktioniert!';
-        }, 3000);
-    } catch(e) {
-        status.innerText = 'Fehler: Kein Zugriff!';
-        status.style.color = '#ed4245';
+        const msgData = fs.readFileSync(messagesFile, 'utf8');
+        chatMessages = JSON.parse(msgData);
+        if (!Array.isArray(chatMessages)) chatMessages = [];
+    } catch (err) {
+        console.error('Fehler beim Laden der messages.json:', err);
     }
 }
 
-socket.on('init state', (data) => {
-    if (data.channels) {
-        globalChannelsData = data.channels;
-        renderChannels(globalChannelsData);
+function saveMessages() {
+    try {
+        fs.writeFileSync(messagesFile, JSON.stringify(chatMessages, null, 2), 'utf8');
+    } catch (err) {
+        console.error('Fehler beim Speichern der messages.json:', err);
     }
-    if (data.messages) {
-        window.allLoadedMessages = data.messages;
-        renderMessagesForCurrentChannel();
+}
+
+// Privatnachrichten-Datei und Persistenz
+const privateMessagesFile = path.join(__dirname, 'privatemessage.json');
+let privateMessages = [];
+
+if (fs.existsSync(privateMessagesFile)) {
+    try {
+        const privData = fs.readFileSync(privateMessagesFile, 'utf8');
+        privateMessages = JSON.parse(privData);
+        if (!Array.isArray(privateMessages)) privateMessages = [];
+    } catch (err) {
+        console.error('Fehler beim Laden der privatemessage.json:', err);
     }
+}
+
+function savePrivateMessages() {
+    try {
+        fs.writeFileSync(privateMessagesFile, JSON.stringify(privateMessages, null, 2), 'utf8');
+    } catch (err) {
+        console.error('Fehler beim Speichern der privatemessage.json:', err);
+    }
+}
+
+const ADMIN_SECRET_KEY = "admin123";
+
+function hasPermission(username, permissionName) {
+    const userProfile = db.profiles[username];
+    if (!userProfile) return false;
+    const roleName = userProfile.rank || 'Agent';
+    const roleData = db.roles[roleName];
+    if (!roleData) return false;
+    if (roleData.permissions.includes('all')) return true;
+    return roleData.permissions.includes(permissionName);
+}
+
+app.post('/api/register', (req, res) => {
+    const { username, password, adminSecret } = req.body;
+
+    if (!username || !password) {
+        return res.status(400).json({ success: false, message: 'Bitte Benutzername und Passwort eingeben.' });
+    }
+
+    if (db.profiles[username] && db.profiles[username].password) {
+        return res.status(400).json({ success: false, message: 'Benutzer existiert bereits.' });
+    }
+
+    let assignedRank = 'Agent';
+    if (adminSecret && adminSecret === ADMIN_SECRET_KEY) {
+        assignedRank = 'Admin';
+    }
+
+    db.profiles[username] = {
+        username: username,
+        password: password,
+        rank: assignedRank,
+        bio: 'Keine Bio angegeben.',
+        avatar: '/default-avatar.png',
+        audioInputId: '',
+        audioOutputId: ''
+    };
+
+    saveDatabase();
+    res.json({ success: true, message: `Registrierung als '${assignedRank}' erfolgreich!` });
 });
 
-function renderChannels(channels) {
-    globalChannelsData = channels;
-    const textDiv = document.getElementById('text-channels');
-    const voiceDiv = document.getElementById('voice-channels');
-    textDiv.innerHTML = '';
-    voiceDiv.innerHTML = '';
+app.post('/api/login', (req, res) => {
+    const { username, password } = req.body;
 
-    channels.text.forEach(ch => {
-        const isActive = (currentChannel === ch);
-        textDiv.innerHTML += `<div class="channel-item ${isActive ? 'active' : ''}" onclick="switchChannel('text', '${ch}')"># ${ch}</div>`;
+    if (!username || !password) {
+        return res.status(400).json({ success: false, message: 'Bitte Benutzername und Passwort eingeben.' });
+    }
+
+    const user = db.profiles[username];
+    if (!user || user.password !== password) {
+        return res.status(400).json({ success: false, message: 'Ungültiger Benutzername oder falsches Passwort.' });
+    }
+
+    res.json({ 
+        success: true, 
+        username: user.username, 
+        role: user.rank, 
+        avatar: user.avatar, 
+        bio: user.bio,
+        audioInputId: user.audioInputId || '',
+        audioOutputId: user.audioOutputId || ''
     });
-
-    channels.voice.forEach(ch => {
-        voiceDiv.innerHTML += `<div class="channel-item" onclick="joinVoiceChannel('${ch}')">🔊 ${ch}</div>`;
-    });
-}
-
-function switchChannel(type, name) {
-    if (type === 'text') {
-        currentChannel = name;
-        document.getElementById('current-channel-title').innerText = `# ${name}`;
-        document.getElementById('chat-messages').style.display = 'flex';
-        document.getElementById('chat-input-area-box').style.display = 'flex';
-        document.getElementById('video-grid').style.display = 'none';
-        document.getElementById('leave-voice-btn').style.display = 'none';
-
-        document.getElementById('msg-input').placeholder = `Nachricht an #${name} senden...`;
-
-        renderChannels(globalChannelsData);
-        renderMessagesForCurrentChannel();
-    }
-}
-
-function renderMessagesForCurrentChannel() {
-    const container = document.getElementById('chat-messages');
-    container.innerHTML = '';
-
-    window.allLoadedMessages = window.allLoadedMessages || [];
-
-    window.allLoadedMessages.forEach(msg => {
-        const targetChannel = msg.channel || 'allgemein';
-        if (targetChannel === currentChannel) {
-            appendMessageToDOM(msg);
-        }
-    });
-    container.scrollTop = container.scrollHeight;
-}
-
-function appendMessageToDOM(msg) {
-    const container = document.getElementById('chat-messages');
-    const userName = msg.user || msg.username || 'Unbekannt';
-    const msgText = msg.text || msg.message || '';
-    const isMarked = msg.marked ? 'border-left: 4px solid #f1c40f; background: rgba(241,196,15,0.05);' : '';
-    
-    const isPrivileged = currentUser && (currentUser.role === 'Admin' || currentUser.role === 'Mod');
-    let adminControls = '';
-    if (isPrivileged) {
-        adminControls = `
-            <span style="margin-left: auto; display: flex; gap: 5px;">
-                <button onclick="toggleMarkMessage('${msg.id}')" style="background: #f1c40f; border: none; font-size: 10px; padding: 2px 5px; cursor: pointer; border-radius: 3px;" title="Markieren">⭐</button>
-                <button onclick="deleteMessage('${msg.id}')" style="background: #ed4245; border: none; font-size: 10px; color: #fff; padding: 2px 5px; cursor: pointer; border-radius: 3px;" title="Löschen">🗑️</button>
-            </span>
-        `;
-    }
-
-    container.innerHTML += `
-        <div class="message" id="msg-${msg.id}" style="padding: 4px; border-radius: 4px; ${isMarked}">
-            <div style="display: flex; align-items: center;">
-                <span class="msg-user" onclick="openUserProfile('${userName}')" style="cursor: pointer; color: #2ecc71;">${userName}</span>
-                ${adminControls}
-            </div>
-            <span class="msg-text">${msgText}</span>
-        </div>
-    `;
-}
-
-function deleteMessage(messageId) {
-    socket.emit('delete_message', { messageId });
-}
-
-function toggleMarkMessage(messageId) {
-    socket.emit('toggle_mark_message', { messageId });
-}
-
-socket.on('load_history', (messages) => {
-    window.allLoadedMessages = messages;
-    renderMessagesForCurrentChannel();
 });
 
-socket.on('chat message', (msg) => {
-    window.allLoadedMessages = window.allLoadedMessages || [];
-    window.allLoadedMessages.push(msg);
-
-    const targetChannel = msg.channel || 'allgemein';
-    if (targetChannel === currentChannel) {
-        appendMessageToDOM(msg);
-        const container = document.getElementById('chat-messages');
-        container.scrollTop = container.scrollHeight;
+app.post('/api/upload-avatar', (req, res) => {
+    const { username, imageBase64 } = req.body;
+    if (!username || !imageBase64) {
+        return res.status(400).json({ success: false, message: 'Fehlende Daten.' });
     }
-});
-
-function checkSend(e) {
-    if (e.key === 'Enter') sendMessage();
-}
-
-function sendMessage() {
-    const input = document.getElementById('msg-input');
-    const text = input.value.trim();
-    if(!text) return;
-
-    socket.emit('chat message', { 
-        channel: currentChannel, 
-        user: currentUser ? currentUser.username : 'Anonym',
-        text: text 
-    });
-    input.value = '';
-}
-
-async function joinVoiceChannel(channelName) {
-    if(currentVoiceChannel || activeCallTarget) leaveVoiceChannel();
-    currentVoiceChannel = channelName;
-
-    document.getElementById('chat-messages').style.display = 'none';
-    document.getElementById('chat-input-area-box').style.display = 'none';
-    document.getElementById('video-grid').style.display = 'grid';
-    document.getElementById('current-channel-title').innerText = `Sprachkanal: ${channelName}`;
-    document.getElementById('leave-voice-btn').style.display = 'block';
-
-    await startAudioStreamEngine(channelName, 'channel');
-    socket.emit('join_voice_channel', { channelName: channelName });
-}
-
-async function startDirectCall(targetUsername) {
-    if(currentVoiceChannel || activeCallTarget) leaveVoiceChannel();
-    activeCallTarget = targetUsername;
-
-    document.getElementById('chat-messages').style.display = 'none';
-    document.getElementById('chat-input-area-box').style.display = 'none';
-    document.getElementById('video-grid').style.display = 'grid';
-    document.getElementById('current-channel-title').innerText = `Direktanruf mit: ${targetUsername}`;
-    document.getElementById('leave-voice-btn').style.display = 'block';
-
-    const callRoom = [currentUser.username, targetUsername].sort().join('_call_');
-    await startAudioStreamEngine(callRoom, 'direct');
-    socket.emit('start_direct_call', { targetUsername: targetUsername, room: callRoom });
-}
-
-socket.on('incoming_direct_call', (data) => {
-    if (confirm(`Eingehender Anruf von ${data.callerName}. Annehmen?`)) {
-        startDirectCall(data.callerName);
-    }
-});
-
-socket.on('direct_call_ended', () => {
-    alert('Der Anruf wurde beendet.');
-    leaveVoiceChannel();
-});
-
-async function startAudioStreamEngine(targetRoom, mode) {
-    const selectedMicId = document.getElementById('audio-input-select')?.value;
 
     try {
-        localStream = await navigator.mediaDevices.getUserMedia({ 
-            audio: {
-                deviceId: selectedMicId ? { exact: selectedMicId } : undefined,
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true
-            },
-            video: false 
-        });
-
-        const monitoringEnabled = document.getElementById('monitoring-toggle')?.checked;
-        if (monitoringEnabled) {
-            monitoringAudio = document.createElement('audio');
-            monitoringAudio.srcObject = localStream;
-            monitoringAudio.autoplay = true;
-            monitoringAudio.muted = false;
-
-            const selectedOutputId = document.getElementById('audio-output-select')?.value;
-            if (selectedOutputId && typeof monitoringAudio.setSinkId === 'function') {
-                monitoringAudio.setSinkId(selectedOutputId).catch(err => console.log('Monitoring SinkId Fehler:', err));
-            }
-            document.body.appendChild(monitoringAudio);
+        const matches = imageBase64.match(/^data:image\/([A-Za-z-+\/]+);base64,(.+)$/);
+        if (!matches || matches.length != 3) {
+            return res.status(400).json({ success: false, message: 'Ungültiges Bildformat.' });
         }
 
-        audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
-        sourceNode = audioContext.createMediaStreamSource(localStream);
-        processorNode = audioContext.createScriptProcessor(2048, 1, 1);
+        const imageType = matches[1];
+        const base64Data = matches[2];
+        const fileName = `${username}_${Date.now()}.${imageType === 'jpeg' ? 'jpg' : imageType}`;
+        const filePath = path.join(uploadsDir, fileName);
 
-        processorNode.onaudioprocess = (e) => {
-            const inputData = e.inputBuffer.getChannelData(0);
-            const bufferCopy = new Float32Array(inputData);
+        fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
+        const avatarUrl = `/uploads/${fileName}`;
 
-            if (mode === 'channel' && currentVoiceChannel) {
-                socket.emit('voice data', {
-                    channel: currentVoiceChannel,
-                    audioBuffer: Array.from(bufferCopy)
-                });
-            } else if (mode === 'direct' && activeCallTarget) {
-                socket.emit('direct_voice_data', {
-                    targetUser: activeCallTarget,
-                    audioBuffer: Array.from(bufferCopy)
-                });
+        if (!db.profiles[username]) db.profiles[username] = {};
+        db.profiles[username].avatar = avatarUrl;
+        saveDatabase();
+
+        res.json({ success: true, avatarUrl });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Fehler beim Speichern.' });
+    }
+});
+
+function getVoiceChannelUsers(channelName) {
+    const room = io.sockets.adapter.rooms.get(channelName);
+    if (!room) return [];
+    const users = [];
+    for (const socketId of room) {
+        const s = io.sockets.sockets.get(socketId);
+        if (s && s.username) {
+            users.push({
+                socketId: s.id,
+                username: s.username,
+                avatar: db.profiles[s.username]?.avatar || '/default-avatar.png'
+            });
+        }
+    }
+    return users;
+}
+
+function broadcastOnlineUsers() {
+    const onlineUsers = [];
+    for (let [id, s] of io.sockets.sockets) {
+        if (s.username) {
+            onlineUsers.push({
+                username: s.username,
+                role: db.profiles[s.username]?.rank || 'Agent'
+            });
+        }
+    }
+    io.emit('update_online_users', onlineUsers);
+}
+
+io.on('connection', (socket) => {
+    socket.emit('init state', {
+        channels: db.channels,
+        messages: chatMessages
+    });
+    socket.emit('load_history', chatMessages);
+
+    // Privaten Nachrichtenverlauf beim Verbinden an den Client senden
+    socket.emit('load_private_history', privateMessages);
+
+    socket.on('set_user_info', (data) => {
+        if (!data || !data.username) return;
+        socket.username = data.username;
+        db.profiles[data.username] = {
+            ...(db.profiles[data.username] || {}),
+            ...data
+        };
+        saveDatabase();
+        broadcastOnlineUsers();
+    });
+
+    socket.on('get_channels', (callback) => {
+        if (typeof callback === 'function') callback(db.channels);
+    });
+
+    socket.on('create_channel', (data, callback) => {
+        const { type, name } = data;
+        if (!type || !name) {
+            if (typeof callback === 'function') callback({ success: false, message: 'Ungültige Daten.' });
+            return;
+        }
+
+        if (!hasPermission(socket.username, 'create_channel') && db.profiles[socket.username]?.rank !== 'Admin') {
+            if (typeof callback === 'function') callback({ success: false, message: 'Keine Berechtigung zum Erstellen von Kanälen.' });
+            return;
+        }
+
+        if (!db.channels[type]) db.channels[type] = [];
+        if (db.channels[type].includes(name)) {
+            if (typeof callback === 'function') callback({ success: false, message: 'Kanal existiert bereits.' });
+            return;
+        }
+
+        db.channels[type].push(name);
+        saveDatabase();
+
+        io.emit('init state', { channels: db.channels, messages: chatMessages });
+        if (typeof callback === 'function') callback({ success: true });
+    });
+
+    socket.on('get_roles_data', (callback) => {
+        if (!hasPermission(socket.username, 'manage_roles') && db.profiles[socket.username]?.rank !== 'Admin') {
+            if (typeof callback === 'function') callback({ success: false });
+            return;
+        }
+        if (typeof callback === 'function') callback({ success: true, roles: db.roles, profiles: db.profiles });
+    });
+
+    socket.on('create_role', (data, callback) => {
+        if (!hasPermission(socket.username, 'manage_roles') && db.profiles[socket.username]?.rank !== 'Admin') return;
+        const { roleName, permissions } = data;
+        if (!roleName) return;
+
+        db.roles[roleName] = { permissions: permissions || [] };
+        saveDatabase();
+        if (typeof callback === 'function') callback({ success: true });
+    });
+
+    socket.on('assign_role', (data, callback) => {
+        if (!hasPermission(socket.username, 'manage_roles') && db.profiles[socket.username]?.rank !== 'Admin') return;
+        const { targetUser, newRole } = data;
+        if (!db.profiles[targetUser] || !db.roles[newRole]) return;
+
+        db.profiles[targetUser].rank = newRole;
+        saveDatabase();
+
+        for (let [id, s] of io.sockets.sockets) {
+            if (s.username === targetUser) {
+                s.emit('role_updated', { role: newRole });
+                break;
             }
+        }
+        broadcastOnlineUsers();
+        if (typeof callback === 'function') callback({ success: true });
+    });
+
+    socket.on('admin_kick', (data, callback) => {
+        const { targetUser } = data;
+        if (!hasPermission(socket.username, 'kick')) {
+            if (typeof callback === 'function') callback({ success: false, message: 'Keine Berechtigung zum Kicken.' });
+            return;
+        }
+
+        for (let [id, s] of io.sockets.sockets) {
+            if (s.username === targetUser) {
+                s.emit('direct_call_ended'); 
+                s.disconnect(true);
+                break;
+            }
+        }
+        if (typeof callback === 'function') callback({ success: true, message: `${targetUser} wurde aus dem Kanal gekickt.` });
+    });
+
+    socket.on('admin_ban', (data, callback) => {
+        const { targetUser, reason } = data;
+        if (!hasPermission(socket.username, 'ban')) {
+            if (typeof callback === 'function') callback({ success: false, message: 'Keine Berechtigung zum Bannen.' });
+            return;
+        }
+
+        delete db.profiles[targetUser];
+        saveDatabase();
+
+        for (let [id, s] of io.sockets.sockets) {
+            if (s.username === targetUser) {
+                s.emit('banned_notification', { reason: reason || 'Kein Grund angegeben' });
+                s.disconnect(true);
+                break;
+            }
+        }
+        broadcastOnlineUsers();
+        if (typeof callback === 'function') callback({ success: true, message: `${targetUser} wurde gebannt. Grund: ${reason || 'Keiner'}` });
+    });
+
+    socket.on('delete_message', (data) => {
+        const { messageId } = data;
+        if (!hasPermission(socket.username, 'delete_messages')) return;
+
+        chatMessages = chatMessages.filter(m => m.id !== messageId);
+        saveMessages();
+        io.emit('message_deleted', { messageId });
+    });
+
+    socket.on('toggle_mark_message', (data) => {
+        const { messageId } = data;
+        if (!hasPermission(socket.username, 'mark_messages')) return;
+
+        const msg = chatMessages.find(m => m.id === messageId);
+        if (msg) {
+            msg.marked = !msg.marked;
+            saveMessages();
+            io.emit('message_marked', { messageId, marked: msg.marked });
+        }
+    });
+
+    socket.on('private_message', (data) => {
+        const { recipient, text } = data;
+        const sender = socket.username;
+        if (!sender || !recipient || !text) return;
+
+        const pmObj = {
+            id: 'pm_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+            sender: sender,
+            recipient: recipient,
+            text: text,
+            timestamp: getFormattedTime()
         };
 
-        sourceNode.connect(processorNode);
-        processorNode.connect(audioContext.destination);
+        privateMessages.push(pmObj);
+        if (privateMessages.length > 500) privateMessages.shift();
+        savePrivateMessages();
 
-    } catch (err) {
-        console.error('Mikrofon-Fehler:', err);
-        alert('Fehler beim Zugriff auf das Mikrofon.');
-    }
-}
-
-function leaveVoiceChannel() {
-    if(localStream) {
-        localStream.getTracks().forEach(track => track.stop());
-        localStream = null;
-    }
-    if(processorNode) {
-        processorNode.disconnect();
-        processorNode = null;
-    }
-    if(sourceNode) {
-        sourceNode.disconnect();
-        sourceNode = null;
-    }
-    if(audioContext) {
-        audioContext.close();
-        audioContext = null;
-    }
-    if(monitoringAudio) {
-        monitoringAudio.remove();
-        monitoringAudio = null;
-    }
-    document.getElementById('video-grid').innerHTML = '';
-
-    if (currentVoiceChannel) {
-        socket.emit('leave_voice_channel');
-        currentVoiceChannel = null;
-    }
-    if (activeCallTarget) {
-        socket.emit('end_direct_call', { targetUser: activeCallTarget });
-        activeCallTarget = null;
-    }
-
-    document.getElementById('leave-voice-btn').style.display = 'none';
-    switchChannel('text', 'allgemein');
-}
-
-socket.on('voice data', (data) => {
-    playIncomingAudio(data.audioBuffer);
-});
-
-socket.on('direct_voice_data', (data) => {
-    playIncomingAudio(data.audioBuffer);
-});
-
-function playIncomingAudio(bufferArray) {
-    try {
-        const playCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
-        const floatData = new Float32Array(bufferArray);
-
-        const audioBuffer = playCtx.createBuffer(1, floatData.length, playCtx.sampleRate);
-        audioBuffer.copyToChannel(floatData, 0);
-
-        const source = playCtx.createBufferSource();
-        source.buffer = audioBuffer;
-
-        const selectedOutputId = document.getElementById('audio-output-select')?.value;
-        const destination = playCtx.destination;
-
-        source.connect(destination);
-        source.start();
-    } catch(e) {
-        console.error('Fehler beim Abspielen von eingehendem Audio:', e);
-    }
-}
-
-socket.on('update_voice_channel_users', (data) => {
-    if (currentVoiceChannel !== data.channelName) return;
-
-    const grid = document.getElementById('video-grid');
-    const activeUsernames = new Set(data.users.map(u => u.username));
-
-    const cards = grid.getElementsByClassName('video-card');
-    Array.from(cards).forEach(card => {
-        const username = card.id.replace('user-card-', '');
-        if (!activeUsernames.has(username)) {
-            card.remove();
+        for (let [id, s] of io.sockets.sockets) {
+            if (s.username === recipient || s.username === sender) {
+                s.emit('private_message', pmObj);
+            }
         }
     });
 
-    data.users.forEach(user => {
-        let cardId = `user-card-${user.username}`;
-        if (!document.getElementById(cardId)) {
-            const card = document.createElement('div');
-            card.className = 'video-card';
-            card.id = cardId;
+    socket.on('join_voice_channel', (data) => {
+        const channelName = data?.channelName;
+        if (!channelName) return;
 
-            const label = document.createElement('div');
-            label.className = 'peer-name';
-            label.innerText = user.username === currentUser.username ? `${user.username} (Du)` : user.username;
-
-            card.appendChild(label);
-            grid.appendChild(card);
+        if (socket.rooms) {
+            socket.rooms.forEach(room => {
+                if (room !== socket.id && room !== channelName) {
+                    socket.leave(room);
+                    io.to(room).emit('update_voice_channel_users', {
+                        channelName: room,
+                        users: getVoiceChannelUsers(room)
+                    });
+                }
+            });
         }
+
+        socket.join(channelName);
+
+        io.to(channelName).emit('update_voice_channel_users', {
+            channelName: channelName,
+            users: getVoiceChannelUsers(channelName)
+        });
+    });
+
+    socket.on('leave_voice_channel', () => {
+        if (socket.rooms) {
+            socket.rooms.forEach(room => {
+                if (room !== socket.id) {
+                    socket.leave(room);
+                    io.to(room).emit('update_voice_channel_users', {
+                        channelName: room,
+                        users: getVoiceChannelUsers(room)
+                    });
+                }
+            });
+        }
+    });
+
+    socket.on('voice data', (data) => {
+        const channel = data?.channel;
+        if (!channel) return;
+        socket.to(channel).emit('voice data', {
+            senderId: socket.id,
+            audioBuffer: data.audioBuffer
+        });
+    });
+
+    socket.on('start_direct_call', (data) => {
+        const { targetUsername, room } = data;
+        socket.join(room);
+
+        for (let [id, s] of io.sockets.sockets) {
+            if (s.username === targetUsername) {
+                s.join(room);
+                s.emit('incoming_direct_call', { callerName: socket.username });
+                break;
+            }
+        }
+    });
+
+    socket.on('direct_voice_data', (data) => {
+        const { targetUser, audioBuffer } = data;
+        for (let [id, s] of io.sockets.sockets) {
+            if (s.username === targetUser) {
+                s.emit('direct_voice_data', { audioBuffer });
+                break;
+            }
+        }
+    });
+
+    socket.on('end_direct_call', (data) => {
+        const { targetUser } = data;
+        if (!socket.username || !targetUser) return;
+        const room = [socket.username, targetUser].sort().join('_call_');
+        socket.leave(room);
+
+        for (let [id, s] of io.sockets.sockets) {
+            if (s.username === targetUser) {
+                s.leave(room);
+                s.emit('direct_call_ended', { by: socket.username });
+                break;
+            }
+        }
+    });
+
+    socket.on('disconnect', () => {
+        if (socket.rooms) {
+            socket.rooms.forEach(room => {
+                if (room !== socket.id) {
+                    io.to(room).emit('update_voice_channel_users', {
+                        channelName: room,
+                        users: getVoiceChannelUsers(room)
+                    });
+                }
+            });
+        }
+        broadcastOnlineUsers();
+    });
+
+    socket.on('set_audio_settings', (data, callback) => {
+        const { username, audioInputId, audioOutputId } = data;
+        if (!username || !db.profiles[username]) {
+            if (typeof callback === 'function') callback({ success: false });
+            return;
+        }
+
+        db.profiles[username].audioInputId = audioInputId || '';
+        db.profiles[username].audioOutputId = audioOutputId || '';
+        saveDatabase();
+
+        if (typeof callback === 'function') callback({ success: true });
+    });
+
+    socket.on('chat message', handleIncomingMessage);
+    socket.on('chat_message', handleIncomingMessage);
+
+    function handleIncomingMessage(data) {
+        const username = socket.username || data.user || data.username || 'Unbekannt';
+        let text = data.text || data.message || '';
+        const channel = data.channel || 'allgemein';
+
+        const urlRegex = /(https?:\/\/[^\s]+)/g;
+        text = text.replace(urlRegex, (url) => {
+            let hostname = '';
+            try {
+                hostname = new URL(url).hostname;
+            } catch (e) {
+                hostname = url;
+            }
+            return `
+                <div style="margin-top: 6px; margin-bottom: 6px;">
+                    <a href="${url}" target="_blank" style="color: #00b0f4; text-decoration: none; word-break: break-all;">${url}</a>
+                    <div style="background: #2f3136; border-left: 4px solid #7289da; padding: 10px; border-radius: 4px; margin-top: 4px; max-width: 400px;">
+                        <div style="font-size: 12px; font-weight: bold; color: #ffffff;">Webseiten-Vorschau</div>
+                        <div style="font-size: 11px; color: #b9bbbe; margin-top: 2px;">Inhalt für: ${hostname}</div>
+                    </div>
+                </div>`;
+        });
+
+        const chatMsg = {
+            id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+            channel: channel,
+            user: username,
+            message: text,
+            text: text,
+            marked: false,
+            avatar: db.profiles[username]?.avatar || '/default-avatar.png',
+            timestamp: getFormattedTime()
+        };
+
+        chatMessages.push(chatMsg);
+        if (chatMessages.length > 500) chatMessages.shift();
+        saveMessages();
+
+        io.emit('chat message', chatMsg);
+        io.emit('chat_message', chatMsg);
+    }
+
+    socket.on('chat_media', (data) => {
+        const { username, type, fileData, fileName: originalFileName, channel: targetChannel } = data;
+        if (!fileData) return;
+        const channel = targetChannel || 'allgemein';
+
+        try {
+            let matches, fileExtension;
+
+            if (type === 'image') {
+                matches = fileData.match(/^data:image\/([A-Za-z-+\/]+);base64,(.+)$/);
+                fileExtension = matches ? (matches[1] === 'jpeg' ? 'jpg' : matches[1]) : 'png';
+            } else if (type === 'audio' || type === 'audiofile') {
+                matches = fileData.match(/^data:audio\/([A-Za-z-+\/]+);base64,(.+)$/);
+                fileExtension = matches ? matches[1].replace('x-', '').replace('webm', 'webm') : 'webm';
+            } else if (type === 'video') {
+                matches = fileData.match(/^data:video\/([A-Za-z-+\/]+);base64,(.+)$/);
+                fileExtension = matches ? matches[1] : 'mp4';
+            } else {
+                return;
+            }
+
+            if (!matches || matches.length != 3) return;
+
+            const base64Data = matches[2];
+            const fileName = `${type}_${username}_${Date.now()}.${fileExtension}`;
+            const filePath = path.join(uploadsDir, fileName);
+
+            fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
+            const fileUrl = `/uploads/${fileName}`;
+
+            let messageHTML = '';
+            if (type === 'image') {
+                messageHTML = `<img src="${fileUrl}" style="max-width: 350px; max-height: 350px; border-radius: 8px; margin-top: 6px; display: block; box-shadow: 0 2px 10px rgba(0,0,0,0.3);">`;
+            } else if (type === 'audio' || type === 'audiofile') {
+                const displayName = originalFileName || 'Sprachnachricht / Audio';
+                messageHTML = `
+                    <div style="background: #2f3136; padding: 10px; border-radius: 8px; margin-top: 6px; max-width: 320px; border: 1px solid #202225;">
+                        <div style="font-size: 12px; color: #dcddde; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                            <span>🎵</span> <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${displayName}</span>
+                        </div>
+                        <audio controls preload="metadata" src="${fileUrl}" style="width: 100%; height: 32px;"></audio>
+                    </div>`;
+            } else if (type === 'video') {
+                messageHTML = `
+                    <div style="margin-top: 6px;">
+                        <video controls src="${fileUrl}" style="max-width: 350px; max-height: 350px; border-radius: 8px; display: block;"></video>
+                    </div>`;
+            }
+
+            const chatMsg = {
+                id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+                channel: channel,
+                user: username,
+                message: messageHTML,
+                text: messageHTML,
+                marked: false,
+                avatar: db.profiles[username]?.avatar || '/default-avatar.png',
+                timestamp: getFormattedTime()
+            };
+
+            chatMessages.push(chatMsg);
+            if (chatMessages.length > 500) chatMessages.shift();
+            saveMessages();
+
+            io.emit('chat message', chatMsg);
+            io.emit('chat_message', chatMsg);
+        } catch (err) {
+            console.error('Fehler beim Speichern der Mediendatei:', err);
+        }
+    });
+
+    socket.on('get_user_profile', (username, callback) => {
+        const profile = db.profiles[username] || { username, bio: 'Keine Bio angegeben.', rank: 'Agent', audioInputId: '', audioOutputId: '' };
+        if (typeof callback === 'function') callback(profile);
+    });
+
+    socket.on('get_friends', (username, callback) => {
+        if (typeof callback === 'function') callback(db.friends[username] || []);
+    });
+
+    socket.on('get_friend_requests', (username, callback) => {
+        if (typeof callback === 'function') callback(db.requests[username] || []);
+    });
+
+    socket.on('check_friendship_status', (data, callback) => {
+        const { username, targetUser } = data;
+        const isFriend = db.friends[username]?.includes(targetUser);
+        const requestSent = db.requests[targetUser]?.includes(username);
+        const requestReceived = db.requests[username]?.includes(targetUser);
+        if (typeof callback === 'function') callback({ isFriend, requestSent, requestReceived });
+    });
+
+    socket.on('send_friend_request', (data, callback) => {
+        const { username, targetName } = data;
+
+        if (!targetName || targetName.trim() === '') {
+            return callback({ success: false, message: 'Ungültiger Benutzer.' });
+        }
+        if (username === targetName) {
+            return callback({ success: false, message: 'Du kannst dir selbst keine Anfrage senden.' });
+        }
+        if (db.friends[username]?.includes(targetName)) {
+            return callback({ success: false, message: 'Ihr seid bereits befreundet.' });
+        }
+
+        if (!db.requests[targetName]) db.requests[targetName] = [];
+        if (db.requests[targetName].includes(username)) {
+            return callback({ success: false, message: 'Es wurde bereits eine Anfrage gesendet.' });
+        }
+
+        if (db.requests[username]?.includes(targetName)) {
+            db.requests[username] = db.requests[username].filter(u => u !== targetName);
+
+            if (!db.friends[username]) db.friends[username] = [];
+            if (!db.friends[targetName]) db.friends[targetName] = [];
+
+            if (!db.friends[username].includes(targetName)) db.friends[username].push(targetName);
+            if (!db.friends[targetName].includes(username)) db.friends[targetName].push(username);
+
+            saveDatabase();
+            return callback({ success: true, message: 'Ihr seid nun befreundet!' });
+        }
+
+        db.requests[targetName].push(username);
+        saveDatabase();
+        if (typeof callback === 'function') callback({ success: true, message: `Freundschaftsanfrage an ${targetName} gesendet!` });
+    });
+
+    socket.on('respond_friend_request', (data, callback) => {
+        const { username, senderName, accept } = data;
+
+        if (db.requests[username]) {
+            db.requests[username] = db.requests[username].filter(u => u !== senderName);
+        }
+
+        if (accept) {
+            if (!db.friends[username]) db.friends[username] = [];
+            if (!db.friends[senderName]) db.friends[senderName] = [];
+
+            if (!db.friends[username].includes(senderName)) db.friends[username].push(senderName);
+            if (!db.friends[senderName].includes(username)) db.friends[senderName].push(username);
+        }
+
+        saveDatabase();
+        if (typeof callback === 'function') callback({ success: true });
+    });
+
+    socket.on('remove_friend', (data, callback) => {
+        const { username, friendName } = data;
+
+        if (db.friends[username]) {
+            db.friends[username] = db.friends[username].filter(f => f !== friendName);
+        }
+        if (db.friends[friendName]) {
+            db.friends[friendName] = db.friends[friendName].filter(f => f !== username);
+        }
+
+        saveDatabase();
+        if (typeof callback === 'function') callback({ success: true, friends: db.friends[username] || [] });
     });
 });
 
-socket.on('peer joined', (data) => {});
-socket.on('peer left', (socketId) => {});
-
-// --- Online-Nutzerliste Aktualisierung ---
-socket.on('update_online_users', (users) => {
-    const listContainer = document.getElementById('online-users-list');
-    if (!listContainer) return;
-    listContainer.innerHTML = '';
-    
-    if (!users || users.length === 0) {
-        listContainer.innerHTML = '<div style="color: #888; font-size: 11px; padding: 2px;">Niemand online</div>';
-        return;
+app.get('/api/view-db', (req, res) => {
+    if (fs.existsSync(dbFile)) {
+        const data = fs.readFileSync(dbFile, 'utf8');
+        res.setHeader('Content-Type', 'application/json');
+        res.send(data);
+    } else {
+        res.status(404).json({ success: false, message: 'Keine database.json gefunden.' });
     }
+});
 
-    users.forEach(u => {
-        listContainer.innerHTML += `
-            <div style="display: flex; align-items: center; gap: 6px; padding: 4px; font-size: 12px; cursor: pointer;" onclick="openUserProfile('${u.username}')">
-                <div style="width: 8px; height: 8px; background: #2ecc71; border-radius: 50%;"></div>
-                <span style="color: #fff;">${u.username}</span> <span style="font-size: 10px; color: #8e9297;">(${u.role || 'Agent'})</span>
-            </div>
-        `;
-    });
+app.get('/api/view-messages', (req, res) => {
+    if (fs.existsSync(messagesFile)) {
+        const data = fs.readFileSync(messagesFile, 'utf8');
+        res.setHeader('Content-Type', 'application/json');
+        res.send(data);
+    } else {
+        res.status(404).json({ success: false, message: 'Keine messages.json gefunden.' });
+    }
+});
+
+// API-Endpunkt für die Ansicht der gespeicherten Privatnachrichten im Browser
+app.get('/api/view-private-messages', (req, res) => {
+    if (fs.existsSync(privateMessagesFile)) {
+        const data = fs.readFileSync(privateMessagesFile, 'utf8');
+        res.setHeader('Content-Type', 'application/json');
+        res.send(data);
+    } else {
+        res.status(404).json({ success: false, message: 'Keine privatemessage.json gefunden.' });
+    }
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`HTTP Server läuft auf Port ${PORT}`);
 });
