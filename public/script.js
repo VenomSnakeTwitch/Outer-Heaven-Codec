@@ -49,8 +49,11 @@ function handleAuth() {
             document.getElementById('user-name-disp').innerText = currentUser.username;
             updateUserAvatarDisplay();
 
+            // Admin-Menü anzeigen, wenn Rolle passt
             if (currentUser.role === 'Admin' || currentUser.role === 'Mod') {
                 document.getElementById('admin-menu-btn').style.display = 'block';
+            } else {
+                document.getElementById('admin-menu-btn').style.display = 'none';
             }
 
             socket.emit('set_user_info', currentUser);
@@ -367,13 +370,20 @@ function handleGeneralUpload(input) {
     input.value = '';
 }
 
+// --- Audiogeräte laden ---
 function loadAudioDevices() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
-        console.warn("MediaDevices API wird von diesem Browser nicht unterstützt.");
+        console.warn("MediaDevices API wird nicht unterstützt.");
         return;
     }
 
-    navigator.mediaDevices.enumerateDevices()
+    // Erst Berechtigung anfordern, damit Browser echte Namen preisgibt
+    navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(stream => {
+            stream.getTracks().forEach(t => t.stop()); // Stream sofort wieder stoppen
+            return navigator.mediaDevices.enumerateDevices();
+        })
+        .catch(() => navigator.mediaDevices.enumerateDevices()) // Falls Mikro verweigert wird, trotzdem versuchen
         .then(devices => {
             const micSelect = document.getElementById('audio-input-select');
             const outSelect = document.getElementById('audio-output-select');
@@ -404,19 +414,32 @@ function loadAudioDevices() {
         .catch(err => console.error("Fehler beim Laden der Audiogeräte:", err));
 }
 
-// Erweitere deine bestehende openSettings-Funktion so:
+// --- Einstellungen & Admin (Kombiniert & Fehlerfrei) ---
 function openSettings() { 
     document.getElementById('settings-modal').style.display = 'flex';
-    loadAudioDevices(); // Geräte direkt beim Öffnen laden
+    loadAudioDevices(); // Befüllt die Dropdowns beim Öffnen
 }
 
-// --- Einstellungen & Admin ---
-function openSettings() { document.getElementById('settings-modal').style.display = 'flex'; }
-function closeSettings() { document.getElementById('settings-modal').style.display = 'none'; }
-function openAdminMenu() { document.getElementById('admin-menu-modal').style.display = 'flex'; }
-function closeAdminMenu() { document.getElementById('admin-menu-modal').style.display = 'none'; }
-function openCreateChannelModal(type) { document.getElementById('create-channel-modal').style.display = 'flex'; window.creatingType = type; }
-function closeCreateChannelModal() { document.getElementById('create-channel-modal').style.display = 'none'; }
+function closeSettings() { 
+    document.getElementById('settings-modal').style.display = 'none'; 
+}
+
+function openAdminMenu() { 
+    document.getElementById('admin-menu-modal').style.display = 'flex'; 
+}
+
+function closeAdminMenu() { 
+    document.getElementById('admin-menu-modal').style.display = 'none'; 
+}
+
+function openCreateChannelModal(type) { 
+    document.getElementById('create-channel-modal').style.display = 'flex'; 
+    window.creatingType = type; 
+}
+
+function closeCreateChannelModal() { 
+    document.getElementById('create-channel-modal').style.display = 'none'; 
+}
 
 function submitCreateChannel() {
     const nameInput = document.getElementById('new-channel-name-input');
@@ -435,5 +458,5 @@ function testMicrophone() {
             status.innerText = 'Mikrofon funktioniert!';
             setTimeout(() => { stream.getTracks().forEach(t => t.stop()); status.innerText = ''; }, 3000);
         })
-        .catch(() => { status.style.color = '#ed4245;'; status.innerText = 'Fehler beim Zugriff.'; });
+        .catch(() => { status.style.color = '#ed4245'; status.innerText = 'Fehler beim Zugriff.'; });
 }
