@@ -5,6 +5,7 @@
     <title>Outer Heaven Codec</title>
     <link rel="stylesheet" href="style.css">
     <style>
+        /* Zusätzlicher Stil für das Privatchat-Fenster */
         #private-chat-container {
             position: fixed;
             bottom: 20px;
@@ -60,6 +61,7 @@
 </head>
 <body>
 
+    <!-- Auth Screen -->
     <div id="auth-screen">
         <div class="auth-box">
             <h2 id="auth-title">Outer Heaven - Login</h2>
@@ -73,6 +75,7 @@
         </div>
     </div>
 
+    <!-- Kanal erstellen Modal -->
     <div id="create-channel-modal" class="modal" style="display:none;">
         <div class="modal-content" style="width: 350px;">
             <h3>Kanal erstellen</h3>
@@ -85,6 +88,7 @@
         </div>
     </div>
 
+    <!-- Admin-Zusatzmenü Modal -->
     <div id="admin-menu-modal" class="modal" style="display:none;">
         <div class="modal-content" style="width: 480px; max-height: 85vh; overflow-y: auto;">
             <h2>Admin Management</h2>
@@ -123,6 +127,7 @@
         </div>
     </div>
 
+    <!-- Einstellungen Modal -->
     <div id="settings-modal" class="modal" style="display:none;">
         <div class="modal-content">
             <h2>Einstellungen</h2>
@@ -163,6 +168,7 @@
         </div>
     </div>
 
+    <!-- Benutzer-Profil Modal -->
     <div id="user-profile-modal" class="modal" style="display:none;">
         <div class="modal-content" style="width: 300px; text-align: center;">
             <h3 id="modal-username">User Profil</h3>
@@ -181,6 +187,7 @@
         </div>
     </div>
 
+    <!-- Dynamisches Privatchat-Fenster -->
     <div id="private-chat-container" style="display: none;">
         <div class="private-chat-header">
             <span id="private-chat-title">Direktnachricht</span>
@@ -193,6 +200,7 @@
         </div>
     </div>
 
+    <!-- Haupt-App -->
     <div class="sidebar">
         <div class="sidebar-header">OUTER HEAVEN</div>
         <div class="channels-list">
@@ -315,28 +323,9 @@
             logout();
         });
 
+        // --- Privatchat Funktionen ---
         let activePrivateChatUser = null;
         let privateMessagesStore = {};
-
-        // Empfängt den gespeicherten privaten Verlauf beim Verbindungsaufbau
-        socket.on('load_private_history', (messages) => {
-            privateMessagesStore = {};
-            messages.forEach(msg => {
-                const currentUserName = (typeof currentUser !== 'undefined' && currentUser.username) ? currentUser.username : (document.getElementById('user-name-disp')?.innerText);
-                const chatPartner = (msg.sender === currentUserName) ? msg.recipient : msg.sender;
-
-                if (!privateMessagesStore[chatPartner]) {
-                    privateMessagesStore[chatPartner] = [];
-                }
-                if (!privateMessagesStore[chatPartner].some(m => m.id === msg.id)) {
-                    privateMessagesStore[chatPartner].push(msg);
-                }
-            });
-
-            if (activePrivateChatUser) {
-                renderPrivateMessages();
-            }
-        });
 
         window.openPrivateChat = function(username) {
             const currentUserName = (typeof currentUser !== 'undefined' && currentUser.username) ? currentUser.username : (document.getElementById('user-name-disp')?.innerText);
@@ -907,4 +896,4 @@
         };
     </script>
 </body>
-</html
+</html>
